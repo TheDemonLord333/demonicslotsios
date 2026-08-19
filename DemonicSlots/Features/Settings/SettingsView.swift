@@ -11,8 +11,11 @@ import SwiftData
 struct SettingsView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.modelContext) private var modelContext
+    // Literal ID, not `UserSettings.singletonID`: #Predicate can't type-check
+    // a bare `Type.staticMember` access inside its closure. Must stay in
+    // sync with that constant.
     @Query(filter: #Predicate<UserSettings> { settings in
-        settings.settingsID == UserSettings.singletonID
+        settings.settingsID == "settings.singleton"
     })
     private var settingsRows: [UserSettings]
 

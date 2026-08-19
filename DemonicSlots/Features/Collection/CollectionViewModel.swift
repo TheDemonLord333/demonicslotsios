@@ -20,9 +20,13 @@ final class CollectionViewModel {
 
     var showFirstLaunchDisclaimer: Bool
 
-    init(context: ModelContext, registry: GameRegistry = .shared) {
+    // `registry` defaults to `nil` rather than `= .shared` directly: default
+    // parameter expressions are evaluated in a nonisolated context, so they
+    // can't reference a MainActor-isolated static property. Resolving the
+    // default inside the (MainActor) init body instead avoids that.
+    init(context: ModelContext, registry: GameRegistry? = nil) {
         self.context = context
-        self.registry = registry
+        self.registry = registry ?? .shared
         self.wallet = WalletService(context: context)
         let profile = wallet.currentProfile()
         self.showFirstLaunchDisclaimer = !profile.hasSeenEntertainmentDisclaimer

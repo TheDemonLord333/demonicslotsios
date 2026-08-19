@@ -19,8 +19,12 @@ final class PlayerProfile {
     var lastSoulRescueDate: Date?
     var hasSeenEntertainmentDisclaimer: Bool
 
+    // `profileID` defaults to the literal, not `PlayerProfile.singletonID`:
+    // default parameter expressions are evaluated in a nonisolated context
+    // and can't reference a MainActor-isolated static property. Must stay
+    // in sync with `singletonID` below.
     init(
-        profileID: String = PlayerProfile.singletonID,
+        profileID: String = "player.singleton",
         soulCoinBalance: Int64 = 5_000,
         createdAt: Date = .now,
         lastSoulRescueDate: Date? = nil,

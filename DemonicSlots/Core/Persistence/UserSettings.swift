@@ -17,8 +17,12 @@ final class UserSettings {
     /// "Reduce Motion" accessibility setting.
     var prefersReducedMotion: Bool
 
+    // `settingsID` defaults to the literal, not `UserSettings.singletonID`:
+    // default parameter expressions are evaluated in a nonisolated context
+    // and can't reference a MainActor-isolated static property. Must stay
+    // in sync with `singletonID` below.
     init(
-        settingsID: String = UserSettings.singletonID,
+        settingsID: String = "settings.singleton",
         isAudioEnabled: Bool = true,
         isMusicEnabled: Bool = true,
         isHapticsEnabled: Bool = true,

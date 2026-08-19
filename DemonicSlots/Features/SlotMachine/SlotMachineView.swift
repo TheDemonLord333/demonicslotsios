@@ -40,12 +40,15 @@ struct SlotMachineView: View {
 private struct SlotMachineContentView: View {
     @Environment(\.modelContext) private var modelContext
     @Environment(\.accessibilityReduceMotion) private var systemReduceMotion
+    // Literal IDs, not `UserSettings.singletonID`/`PlayerProfile.singletonID`:
+    // #Predicate can't type-check a bare `Type.staticMember` access inside
+    // its closure. Must stay in sync with those constants.
     @Query(filter: #Predicate<UserSettings> { settings in
-        settings.settingsID == UserSettings.singletonID
+        settings.settingsID == "settings.singleton"
     })
     private var settingsRows: [UserSettings]
     @Query(filter: #Predicate<PlayerProfile> { profile in
-        profile.profileID == PlayerProfile.singletonID
+        profile.profileID == "player.singleton"
     })
     private var profiles: [PlayerProfile]
 

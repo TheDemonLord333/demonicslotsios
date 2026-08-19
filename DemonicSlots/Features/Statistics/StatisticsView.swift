@@ -11,8 +11,11 @@ import SwiftData
 struct StatisticsView: View {
     @Environment(\.dismiss) private var dismiss
     @Query private var allStatistics: [GameStatistics]
+    // Literal ID, not `PlayerProfile.singletonID`: #Predicate can't
+    // type-check a bare `Type.staticMember` access inside its closure. Must
+    // stay in sync with that constant.
     @Query(filter: #Predicate<PlayerProfile> { profile in
-        profile.profileID == PlayerProfile.singletonID
+        profile.profileID == "player.singleton"
     })
     private var profiles: [PlayerProfile]
 

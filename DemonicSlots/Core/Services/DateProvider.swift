@@ -11,11 +11,11 @@ protocol DateProvider: Sendable {
     func now() -> Date
 }
 
-struct SystemDateProvider: DateProvider {
+nonisolated struct SystemDateProvider: DateProvider {
     func now() -> Date { Date() }
 }
 
-struct FixedDateProvider: DateProvider {
+nonisolated struct FixedDateProvider: DateProvider {
     let fixedDate: Date
     func now() -> Date { fixedDate }
 }
