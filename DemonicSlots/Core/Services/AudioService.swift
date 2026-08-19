@@ -37,6 +37,13 @@ final class AudioService {
         }
     }
 
+    /// Stops one specific in-flight effect, if it's still playing (e.g. a
+    /// reel spin-loop cut short by an early state change).
+    func stopEffect(key: String) {
+        effectPlayers[key]?.stop()
+        effectPlayers[key] = nil
+    }
+
     func startBackgroundMusic(key: String) {
         guard isMusicEnabledProvider(), !key.isEmpty, let url = resolvedURL(forKey: key) else { return }
         do {

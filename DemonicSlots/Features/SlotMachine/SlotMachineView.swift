@@ -80,7 +80,10 @@ private struct SlotMachineContentView: View {
                     spinToken: spinToken,
                     reduceMotion: reduceMotion,
                     showPaylines: showLines,
-                    onReelSettled: { hapticsService?.reelStop() }
+                    onReelSettled: {
+                        hapticsService?.reelStop()
+                        audioService?.playEffect(key: definition.audioKeys.reelStop)
+                    }
                 )
 
                 infoRow
@@ -295,11 +298,19 @@ private struct SlotMachineContentView: View {
 
     private func handleStateChange(_ newState: SlotMachineState) {
         switch newState {
+        case .spinning:
+            audioService?.playEffect(key: definition.audioKeys.spinLoop)
+        case .stopping:
+            audioService?.stopEffect(key: definition.audioKeys.spinLoop)
         case .celebrating:
+            if let scatterWin = controller.currentEvaluation?.scatterWin, scatterWin.count > 0 {
+                audioService?.playEffect(key: definition.audioKeys.scatterHit)
+            }
             audioService?.playEffect(key: isBigWin ? definition.audioKeys.bigWin : definition.audioKeys.lineWin)
             hapticsService?.win(intensity: isBigWin ? .big : .medium)
             particleScene.emitEmbers(intensity: isBigWin ? .big : .medium)
         case .enteringBonus:
+            audioService?.playEffect(key: definition.audioKeys.scatterHit)
             audioService?.playEffect(key: definition.audioKeys.bonusEnter)
             hapticsService?.win(intensity: .big)
             particleScene.emitRiftBurst()
