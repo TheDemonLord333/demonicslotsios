@@ -99,24 +99,33 @@ No separate copy/staging step, no second checkout - one clone, one place.
 >    interactively), `su demonicslots` or `sudo -u demonicslots -s` won't
 >    work either - always prefix each individual command with
 >    `sudo -u demonicslots <command...>` instead.
-> 3. **`systemctl start` fails with `Result: resources`** has two possible
->    causes, in order of likelihood:
->    1. A path in `ReadWritePaths=` doesn't exist yet - `mkdir` it (as
->       `demonicslots`) before starting the service; step 3 below does
->       this.
->    2. The host itself won't grant the service a new mount namespace at
->       all, which `PrivateTmp`/`ProtectSystem=strict`/`ReadWritePaths`
->       all need - common on virtualized/restricted "root servers"
->       (OpenVZ, some LXC setups). If restarting after (1) still fails
->       identically, this is almost certainly it: run
->       `journalctl -xeu demonicslots-backend.service --no-pager | tail -30`
->       to confirm (look for `namespace`/`mount` in the error), then drop
->       those three directives from `deploy/demonicslots-backend.service`
->       (keep `NoNewPrivileges=true` - that one's a plain syscall, not a
->       namespace, and works everywhere) and
->       `sudo cp deploy/demonicslots-backend.service /etc/systemd/system/ && sudo systemctl daemon-reload && sudo systemctl restart demonicslots-backend`.
->       The already-current version of that file in the repo has this
->       pre-applied.
+> 3. **`systemctl start` fails with `Result: resources`** is systemd's
+>    generic bucket for "couldn't even get the process running", so it
+>    covers a few unrelated causes - **always check the real reason
+>    first**, don't guess:
+>    ```
+>    journalctl -xeu demonicslots-backend.service --no-pager | tail -30
+>    ```
+>    Look for a `systemd[1]:` line right above `Failed with result
+>    'resources'` - that's the actual cause. The two seen so far:
+>    - **`Failed to load environment files: No such file or directory`**
+>      - `EnvironmentFile=.../backend/.env` doesn't exist. Unlike
+>        `ExecStart`, systemd treats a missing `EnvironmentFile=` as fatal
+>        (there's an optional `-`-prefixed form, deliberately not used
+>        here since `ADMIN_TOKEN` is required). Fix: create it - step 3
+>        below does this (`cp .env.example .env` then set `ADMIN_TOKEN`).
+>    - A path in `ReadWritePaths=` doesn't exist yet - `mkdir` it (as
+>      `demonicslots`); step 3 below does this too.
+>
+>    A third possibility if the journal instead mentions `namespace` or
+>    `mount`: the host won't grant the service a new mount namespace at
+>    all, which `PrivateTmp`/`ProtectSystem=strict`/`ReadWritePaths` all
+>    need - happens on some virtualized/restricted "root servers" (OpenVZ,
+>    certain LXC setups). `deploy/demonicslots-backend.service` no longer
+>    uses any of those three directives for exactly this reason (kept only
+>    `NoNewPrivileges=true`, a plain syscall rather than a namespace
+>    operation) - if you're on an older copy of the unit file,
+>    `sudo git -C /srv/nodeapps/demonicslotsios pull` and re-install it.
 
 ```bash
 # 1. System packages (build tools only needed if better-sqlite3 can't use
