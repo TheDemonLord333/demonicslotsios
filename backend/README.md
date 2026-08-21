@@ -74,18 +74,31 @@ This app is configured to talk to **`demonicslots.thedemonlord333.me`**
 (`DemonicSlots/Core/Networking/BackendConfig.swift`) - point that domain's
 DNS A/AAAA record at this server before running `certbot` below.
 
-The app lives under **`/srv/nodeapps/demonicslots`**. `deploy/demonicslots-backend.service`
-already has that path filled in.
+The whole repo is cloned directly to **`/srv/nodeapps/demonicslotsios`**,
+and the backend runs out of `/srv/nodeapps/demonicslotsios/backend` -
+`deploy/demonicslots-backend.service` already has that path filled in.
+No separate copy/staging step, no second checkout - one clone, one place.
 
-> **Why `npm install` can fail with `EACCES: permission denied, mkdir`:**
-> it means the directory you're installing into either doesn't exist yet or
-> isn't owned by whichever user is running `npm`. `npm install` (especially
-> with `--prefix`) will try to create missing folders itself, but it can
-> only do that if it has write access to their *parent* directory - it
-> can't sudo itself. The fix is always the same: create the directory and
-> fix its ownership (`chown -R`) for the exact user that will run `npm`
-> **before** running `npm install`, not after. That's what steps 2-3 below
-> do, in that order - don't reorder them.
+> **Two footguns that bite here, both about the `demonicslots` service
+> user created below:**
+>
+> 1. **`EACCES: permission denied, mkdir ...`** on `npm install` means the
+>    directory you're installing into isn't owned by whichever user is
+>    running `npm`. `npm install` (especially with `--prefix`) will try to
+>    create missing folders itself, but it can only do that if it already
+>    has write access to their *parent* - it can't sudo itself. Fix:
+>    `chown -R demonicslots:demonicslots` the whole checkout **before**
+>    running `npm install` as that user, not after (steps 2-3 below, in
+>    that order).
+> 2. **`sudo -u demonicslots` on its own does nothing** (you'll just see
+>    sudo's usage/help text) - it always needs a command after it, e.g.
+>    `sudo -u demonicslots npm install ...`. It also does **not** give you
+>    an interactive shell "as" that user the way `su demonicslots` would.
+>    And since the account is created with `--shell /usr/sbin/nologin`
+>    (deliberately, so a compromised Node process can't be used to log in
+>    interactively), `su demonicslots` or `sudo -u demonicslots -s` won't
+>    work either - always prefix each individual command with
+>    `sudo -u demonicslots <command...>` instead.
 
 ```bash
 # 1. System packages (build tools only needed if better-sqlite3 can't use
@@ -93,26 +106,22 @@ already has that path filled in.
 sudo apt update
 sudo apt install -y nodejs npm nginx certbot python3-certbot-nginx
 
-# 2. Create the app directory and a dedicated, unprivileged service user
-#    for it FIRST, and fix ownership BEFORE anything writes into it -
-#    this is the step that avoids the EACCES error.
-sudo mkdir -p /srv/nodeapps/demonicslots
-sudo useradd --system --home /srv/nodeapps/demonicslots --shell /usr/sbin/nologin demonicslots || true
-sudo chown -R demonicslots:demonicslots /srv/nodeapps/demonicslots
+# 2. Clone the repo where it'll actually run from, create the dedicated
+#    service user, and hand it ownership of the whole checkout BEFORE
+#    anything (npm install, writing .env) touches it.
+sudo mkdir -p /srv/nodeapps
+sudo git clone <your-repo-url> /srv/nodeapps/demonicslotsios   # or: sudo git -C /srv/nodeapps/demonicslotsios pull
+sudo useradd --system --home /srv/nodeapps/demonicslotsios --shell /usr/sbin/nologin demonicslots || true
+sudo chown -R demonicslots:demonicslots /srv/nodeapps/demonicslotsios
 
-# 3. Get the code onto the server and install dependencies. Everything
-#    from here on runs *as the demonicslots user* (via `sudo -u`), so
-#    whatever it creates is already owned correctly - never plain
-#    `npm install` as your own login user or as root against this path.
-sudo git clone <your-repo-url> /srv/nodeapps/demonicslots-src   # or `git pull` if already cloned
-sudo cp -r /srv/nodeapps/demonicslots-src/backend/. /srv/nodeapps/demonicslots/backend/
-sudo chown -R demonicslots:demonicslots /srv/nodeapps/demonicslots/backend
-sudo -u demonicslots cp /srv/nodeapps/demonicslots/backend/.env.example /srv/nodeapps/demonicslots/backend/.env
-sudo -u demonicslots nano /srv/nodeapps/demonicslots/backend/.env   # set ADMIN_TOKEN (openssl rand -hex 32)
-sudo -u demonicslots npm install --omit=dev --prefix /srv/nodeapps/demonicslots/backend
+# 3. .env + dependencies, run as the demonicslots user (see footgun #2
+#    above - every command needs the `sudo -u demonicslots` prefix)
+sudo -u demonicslots cp /srv/nodeapps/demonicslotsios/backend/.env.example /srv/nodeapps/demonicslotsios/backend/.env
+sudo -u demonicslots nano /srv/nodeapps/demonicslotsios/backend/.env   # set ADMIN_TOKEN (openssl rand -hex 32)
+sudo -u demonicslots npm install --omit=dev --prefix /srv/nodeapps/demonicslotsios/backend
 
 # 4. systemd service
-sudo cp deploy/demonicslots-backend.service /etc/systemd/system/
+sudo cp /srv/nodeapps/demonicslotsios/backend/deploy/demonicslots-backend.service /etc/systemd/system/
 sudo systemctl daemon-reload
 sudo systemctl enable --now demonicslots-backend
 sudo systemctl status demonicslots-backend
@@ -124,16 +133,16 @@ sudo ufw deny 3007
 
 # 6. nginx + TLS (reverse proxy; deploy/nginx.conf.example already has the
 #    right server_name, demonicslots.thedemonlord333.me, filled in)
-sudo cp deploy/nginx.conf.example /etc/nginx/sites-available/demonicslots
+sudo cp /srv/nodeapps/demonicslotsios/backend/deploy/nginx.conf.example /etc/nginx/sites-available/demonicslots
 sudo ln -s /etc/nginx/sites-available/demonicslots /etc/nginx/sites-enabled/
 sudo nginx -t && sudo systemctl reload nginx
 sudo certbot --nginx -d demonicslots.thedemonlord333.me   # issues the cert and
                                         # rewrites the nginx config for HTTPS + redirect
 ```
 
-If you already have a partially-created `/srv/nodeapps/demonicslots` from a
-failed attempt, just re-run step 2's `chown -R` (harmless to repeat) before
-retrying `npm install` - you don't need to delete anything first.
+If you already have a partially-created `/srv/nodeapps/demonicslotsios`
+from a failed attempt, just re-run step 2's `chown -R` (harmless to
+repeat) before retrying `npm install` - nothing needs to be deleted first.
 
 After that, `https://demonicslots.thedemonlord333.me/api/health` should
 return `{"status":"ok",...}` and the app talks to that same URL (not
@@ -142,22 +151,21 @@ internally).
 
 ### Updating after a `git pull`
 
-The `-src` checkout stays root-owned throughout (only the deployed
-`backend/` copy is handed to the `demonicslots` user), so `git clone`/`pull`
-against it always run as root/sudo, never as `demonicslots`:
+`git pull` always runs as root/sudo, never as `demonicslots` (that account
+can't log in interactively - see footgun #2 above, and it doesn't need
+write access to `.git/` anyway):
 
 ```bash
 sudo systemctl stop demonicslots-backend
-sudo git -C /srv/nodeapps/demonicslots-src pull
-sudo cp -r /srv/nodeapps/demonicslots-src/backend/. /srv/nodeapps/demonicslots/backend/  # keep your existing .env and data/
-sudo chown -R demonicslots:demonicslots /srv/nodeapps/demonicslots/backend
-sudo -u demonicslots npm install --omit=dev --prefix /srv/nodeapps/demonicslots/backend
+sudo git -C /srv/nodeapps/demonicslotsios pull
+sudo chown -R demonicslots:demonicslots /srv/nodeapps/demonicslotsios   # pull re-creates files as root - fix ownership again
+sudo -u demonicslots npm install --omit=dev --prefix /srv/nodeapps/demonicslotsios/backend
 sudo systemctl start demonicslots-backend
 ```
 
 ### Backups
 
-Everything lives in one file: `/srv/nodeapps/demonicslots/backend/data/demonicslots.sqlite`
+Everything lives in one file: `/srv/nodeapps/demonicslotsios/backend/data/demonicslots.sqlite`
 (plus WAL sidecar files while the process is running). Stop the service or
 use `sqlite3 data/demonicslots.sqlite ".backup backup.sqlite"` (run from
 that `backend/` directory) for a consistent snapshot without downtime.

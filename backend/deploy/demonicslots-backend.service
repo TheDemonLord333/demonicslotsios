@@ -4,8 +4,8 @@ After=network.target
 
 [Service]
 Type=simple
-WorkingDirectory=/srv/nodeapps/demonicslots/backend
-EnvironmentFile=/srv/nodeapps/demonicslots/backend/.env
+WorkingDirectory=/srv/nodeapps/demonicslotsios/backend
+EnvironmentFile=/srv/nodeapps/demonicslotsios/backend/.env
 ExecStart=/usr/bin/node src/server.js
 Restart=on-failure
 RestartSec=5
@@ -17,7 +17,7 @@ Group=demonicslots
 NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict
-ReadWritePaths=/srv/nodeapps/demonicslots/backend/data
+ReadWritePaths=/srv/nodeapps/demonicslotsios/backend/data
 
 [Install]
 WantedBy=multi-user.target
