@@ -99,18 +99,24 @@ No separate copy/staging step, no second checkout - one clone, one place.
 >    interactively), `su demonicslots` or `sudo -u demonicslots -s` won't
 >    work either - always prefix each individual command with
 >    `sudo -u demonicslots <command...>` instead.
-> 3. **`systemctl start` fails with `Result: resources`** (check
->    `journalctl -xeu demonicslots-backend.service` to confirm) almost
->    always means a path in `ReadWritePaths=` doesn't exist yet.
->    `deploy/demonicslots-backend.service` uses `ProtectSystem=strict`,
->    which makes the whole filesystem read-only except for
->    `ReadWritePaths=.../backend/data` - systemd needs that directory to
->    already exist so it can bind-mount it as the one writable exception;
->    it won't create it for you, and the Node process never gets far
->    enough to create it itself under the sandbox. Fix: `mkdir` it (as
->    `demonicslots`) before starting the service - step 3 below does this;
->    if you already hit this, just run that `mkdir`/`chown` line and
->    `sudo systemctl restart demonicslots-backend`.
+> 3. **`systemctl start` fails with `Result: resources`** has two possible
+>    causes, in order of likelihood:
+>    1. A path in `ReadWritePaths=` doesn't exist yet - `mkdir` it (as
+>       `demonicslots`) before starting the service; step 3 below does
+>       this.
+>    2. The host itself won't grant the service a new mount namespace at
+>       all, which `PrivateTmp`/`ProtectSystem=strict`/`ReadWritePaths`
+>       all need - common on virtualized/restricted "root servers"
+>       (OpenVZ, some LXC setups). If restarting after (1) still fails
+>       identically, this is almost certainly it: run
+>       `journalctl -xeu demonicslots-backend.service --no-pager | tail -30`
+>       to confirm (look for `namespace`/`mount` in the error), then drop
+>       those three directives from `deploy/demonicslots-backend.service`
+>       (keep `NoNewPrivileges=true` - that one's a plain syscall, not a
+>       namespace, and works everywhere) and
+>       `sudo cp deploy/demonicslots-backend.service /etc/systemd/system/ && sudo systemctl daemon-reload && sudo systemctl restart demonicslots-backend`.
+>       The already-current version of that file in the repo has this
+>       pre-applied.
 
 ```bash
 # 1. System packages (build tools only needed if better-sqlite3 can't use

@@ -12,12 +12,16 @@ RestartSec=5
 User=demonicslots
 Group=demonicslots
 
-# Light sandboxing - the service only needs to read its own directory and
-# write to its own data/ folder.
+# Light sandboxing. NoNewPrivileges is a plain prctl() call - safe
+# everywhere. PrivateTmp/ProtectSystem=strict/ReadWritePaths need the
+# kernel to allow the service a new mount namespace, which some
+# virtualized/restricted "root servers" (OpenVZ, certain LXC configs)
+# don't permit - that shows up as `systemctl start` failing with
+# "Result: resources" no matter what ReadWritePaths points at. If yours
+# is one of those hosts, this is deliberately left off; the service
+# already only runs as the unprivileged `demonicslots` user, which is
+# the security boundary that actually matters here.
 NoNewPrivileges=true
-PrivateTmp=true
-ProtectSystem=strict
-ReadWritePaths=/srv/nodeapps/demonicslotsios/backend/data
 
 [Install]
 WantedBy=multi-user.target
