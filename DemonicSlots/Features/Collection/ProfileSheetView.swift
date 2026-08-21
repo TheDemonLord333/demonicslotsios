@@ -1,0 +1,143 @@
+//
+//  ProfileSheetView.swift
+//  DemonicSlots
+//
+//  Popup behind the profile icon on the collection screen. Two states:
+//  no username claimed yet (a short form), or already registered (status +
+//  a manual "sync now" action). All logic lives in `AccountSyncController` -
+//  this view only reads its state and forwards the username the player typed.
+//
+import SwiftUI
+
+struct ProfileSheetView: View {
+    @Bindable var accountSync: AccountSyncController
+    @Environment(\.dismiss) private var dismiss
+    @State private var usernameInput = ""
+    @FocusState private var usernameFieldFocused: Bool
+
+    var body: some View {
+        NavigationStack {
+            VStack(spacing: 22) {
+                if let username = accountSync.username {
+                    registeredView(username: username)
+                } else {
+                    registrationView
+                }
+                Spacer()
+            }
+            .padding(24)
+            .frame(maxWidth: .infinity, alignment: .top)
+            .background(DemonicPalette.obsidianBlack.ignoresSafeArea())
+            .navigationTitle("Profil")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Fertig") { dismiss() }
+                        .frame(minHeight: 44)
+                }
+            }
+        }
+        .presentationDetents([.medium])
+    }
+
+    private var registrationView: some View {
+        VStack(spacing: 16) {
+            Image(systemName: "person.crop.circle.badge.questionmark")
+                .font(.system(size: 44))
+                .foregroundStyle(DemonicPalette.glowingViolet)
+
+            Text("Online-Profil einrichten")
+                .font(.headline)
+                .foregroundStyle(DemonicPalette.boneIvory)
+
+            Text("Optional: Wähle einen einmaligen Benutzernamen, um dein Soul-Coin-Guthaben bei bestehender Internetverbindung mit dem Server zu sichern. Das Spiel funktioniert auch weiterhin komplett offline.")
+                .font(.footnote)
+                .multilineTextAlignment(.center)
+                .foregroundStyle(DemonicPalette.boneIvory.opacity(0.7))
+
+            TextField("Benutzername", text: $usernameInput)
+                .textFieldStyle(.roundedBorder)
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
+                .focused($usernameFieldFocused)
+                .submitLabel(.done)
+                .onSubmit(submitRegistration)
+                .frame(minHeight: 44)
+                .accessibilityLabel("Benutzername eingeben, 3 bis 20 Zeichen")
+
+            if case .error(let message) = accountSync.state {
+                Text(message)
+                    .font(.footnote)
+                    .foregroundStyle(DemonicPalette.hellfireRed)
+                    .multilineTextAlignment(.center)
+            }
+
+            Button(action: submitRegistration) {
+                if accountSync.state == .working {
+                    ProgressView().tint(.white)
+                } else {
+                    Text("Registrieren")
+                        .frame(maxWidth: .infinity)
+                }
+            }
+            .buttonStyle(.borderedProminent)
+            .tint(DemonicPalette.hellfireRed)
+            .frame(maxWidth: .infinity, minHeight: 44)
+            .disabled(trimmedUsername.isEmpty || accountSync.state == .working)
+        }
+    }
+
+    private func registeredView(username: String) -> some View {
+        VStack(spacing: 16) {
+            Image(systemName: "person.crop.circle.fill")
+                .font(.system(size: 44))
+                .foregroundStyle(DemonicPalette.emberOrange)
+
+            Text(username)
+                .font(.title3.weight(.bold))
+                .foregroundStyle(DemonicPalette.boneIvory)
+
+            if let lastSyncedAt = accountSync.lastSyncedAt {
+                Text("Zuletzt synchronisiert: \(lastSyncedAt.formatted(date: .abbreviated, time: .shortened))")
+                    .font(.footnote)
+                    .foregroundStyle(DemonicPalette.boneIvory.opacity(0.6))
+            } else {
+                Text("Noch nicht synchronisiert.")
+                    .font(.footnote)
+                    .foregroundStyle(DemonicPalette.boneIvory.opacity(0.6))
+            }
+
+            if case .error(let message) = accountSync.state {
+                Text(message)
+                    .font(.footnote)
+                    .foregroundStyle(DemonicPalette.hellfireRed)
+                    .multilineTextAlignment(.center)
+            }
+
+            Button {
+                Task { await accountSync.syncSilently(reportErrors: true) }
+            } label: {
+                if accountSync.state == .working {
+                    ProgressView().tint(.white)
+                } else {
+                    Label("Jetzt synchronisieren", systemImage: "arrow.triangle.2.circlepath")
+                        .frame(maxWidth: .infinity)
+                }
+            }
+            .buttonStyle(.bordered)
+            .tint(DemonicPalette.glowingViolet)
+            .frame(maxWidth: .infinity, minHeight: 44)
+            .disabled(accountSync.state == .working)
+        }
+    }
+
+    private var trimmedUsername: String {
+        usernameInput.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private func submitRegistration() {
+        guard !trimmedUsername.isEmpty, accountSync.state != .working else { return }
+        usernameFieldFocused = false
+        Task { await accountSync.register(username: trimmedUsername) }
+    }
+}

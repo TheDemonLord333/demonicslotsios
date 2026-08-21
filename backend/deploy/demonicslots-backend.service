@@ -1,0 +1,25 @@
+[Unit]
+Description=Demonic Slots backend (Node.js)
+After=network.target
+
+[Service]
+Type=simple
+# Adjust these two paths to wherever you cloned the repo and which user
+# should own the process (avoid running as root).
+WorkingDirectory=/opt/demonicslots/backend
+EnvironmentFile=/opt/demonicslots/backend/.env
+ExecStart=/usr/bin/node src/server.js
+Restart=on-failure
+RestartSec=5
+User=demonicslots
+Group=demonicslots
+
+# Light sandboxing - the service only needs to read its own directory and
+# write to its own data/ folder.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ReadWritePaths=/opt/demonicslots/backend/data
+
+[Install]
+WantedBy=multi-user.target
