@@ -1,21 +1,23 @@
 # nginx reverse proxy for the Demonic Slots backend.
 #
-# Replace YOUR_DOMAIN with your real domain (e.g. api.example.com) and put
-# this file at /etc/nginx/sites-available/demonicslots, then:
+# Put this file at /etc/nginx/sites-available/demonicslots, then:
 #
 #   sudo ln -s /etc/nginx/sites-available/demonicslots /etc/nginx/sites-enabled/
 #   sudo nginx -t
 #   sudo systemctl reload nginx
-#   sudo certbot --nginx -d YOUR_DOMAIN
+#   sudo certbot --nginx -d demonicslots.thedemonlord333.me
 #
 # certbot rewrites this file to add the TLS (listen 443/ssl) block and the
 # HTTP->HTTPS redirect automatically - the block below is the plain-HTTP
 # starting point certbot needs to see before it can issue a certificate.
+#
+# Before certbot can issue anything, demonicslots.thedemonlord333.me must
+# already resolve (an A/AAAA DNS record) to this server's public IP.
 
 server {
     listen 80;
     listen [::]:80;
-    server_name YOUR_DOMAIN;
+    server_name demonicslots.thedemonlord333.me;
 
     location / {
         proxy_pass http://127.0.0.1:3007;

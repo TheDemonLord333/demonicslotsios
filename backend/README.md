@@ -62,12 +62,17 @@ All request/response bodies are JSON.
 | `PATCH /api/admin/players/:username/balance` | same | Body: `{ "balance": 12345 }`. Sets the balance **and increments `admin_revision`** - this is the call your "weitere App" makes. |
 
 A minimal built-in admin page is served at `/admin` (e.g.
-`https://your-domain/admin`) - paste your `ADMIN_TOKEN` in, list players,
-edit balances. It's there so you have something usable immediately; swap
-it for (or add to it) a dedicated admin app any time by calling the same
-`/api/admin/*` endpoints - nothing about the protocol is tied to that page.
+`https://demonicslots.thedemonlord333.me/admin`) - paste your `ADMIN_TOKEN`
+in, list players, edit balances. It's there so you have something usable
+immediately; swap it for (or add to it) a dedicated admin app any time by
+calling the same `/api/admin/*` endpoints - nothing about the protocol is
+tied to that page.
 
 ## Deploying on Debian 12
+
+This app is configured to talk to **`demonicslots.thedemonlord333.me`**
+(`DemonicSlots/Core/Networking/BackendConfig.swift`) - point that domain's
+DNS A/AAAA record at this server before running `certbot` below.
 
 ```bash
 # 1. System packages (build tools only needed if better-sqlite3 can't use
@@ -97,18 +102,19 @@ sudo systemctl status demonicslots-backend
 sudo ufw allow 80,443/tcp
 sudo ufw deny 3007
 
-# 5. nginx + TLS (reverse proxy, per the HTTPS setup chosen for this app)
+# 5. nginx + TLS (reverse proxy; deploy/nginx.conf.example already has the
+#    right server_name, demonicslots.thedemonlord333.me, filled in)
 sudo cp deploy/nginx.conf.example /etc/nginx/sites-available/demonicslots
-sudo nano /etc/nginx/sites-available/demonicslots   # replace YOUR_DOMAIN
 sudo ln -s /etc/nginx/sites-available/demonicslots /etc/nginx/sites-enabled/
 sudo nginx -t && sudo systemctl reload nginx
-sudo certbot --nginx -d YOUR_DOMAIN   # issues the cert and rewrites the
-                                        # nginx config to serve HTTPS + redirect
+sudo certbot --nginx -d demonicslots.thedemonlord333.me   # issues the cert and
+                                        # rewrites the nginx config for HTTPS + redirect
 ```
 
-After that, `https://YOUR_DOMAIN/api/health` should return `{"status":"ok",...}`
-and the app talks to `https://YOUR_DOMAIN` (not directly to port 3007 -
-nginx/certbot terminate TLS and forward internally).
+After that, `https://demonicslots.thedemonlord333.me/api/health` should
+return `{"status":"ok",...}` and the app talks to that same URL (not
+directly to port 3007 - nginx/certbot terminate TLS and forward
+internally).
 
 ### Updating after a `git pull`
 
