@@ -74,35 +74,55 @@ This app is configured to talk to **`demonicslots.thedemonlord333.me`**
 (`DemonicSlots/Core/Networking/BackendConfig.swift`) - point that domain's
 DNS A/AAAA record at this server before running `certbot` below.
 
+The app lives under **`/srv/nodeapps/demonicslots`**. `deploy/demonicslots-backend.service`
+already has that path filled in.
+
+> **Why `npm install` can fail with `EACCES: permission denied, mkdir`:**
+> it means the directory you're installing into either doesn't exist yet or
+> isn't owned by whichever user is running `npm`. `npm install` (especially
+> with `--prefix`) will try to create missing folders itself, but it can
+> only do that if it has write access to their *parent* directory - it
+> can't sudo itself. The fix is always the same: create the directory and
+> fix its ownership (`chown -R`) for the exact user that will run `npm`
+> **before** running `npm install`, not after. That's what steps 2-3 below
+> do, in that order - don't reorder them.
+
 ```bash
 # 1. System packages (build tools only needed if better-sqlite3 can't use
 #    its prebuilt binary for your architecture - try without first)
 sudo apt update
 sudo apt install -y nodejs npm nginx certbot python3-certbot-nginx
 
-# 2. Get the code onto the server and install dependencies
-sudo mkdir -p /opt/demonicslots
-sudo git clone <your-repo-url> /opt/demonicslots-src   # or `git pull` if already cloned
-sudo cp -r /opt/demonicslots-src/backend /opt/demonicslots/backend
-cd /opt/demonicslots/backend
-sudo cp .env.example .env
-sudo nano .env    # set ADMIN_TOKEN to a real secret (openssl rand -hex 32)
-sudo useradd --system --home /opt/demonicslots/backend --shell /usr/sbin/nologin demonicslots
-sudo chown -R demonicslots:demonicslots /opt/demonicslots/backend
-sudo -u demonicslots npm install --omit=dev --prefix /opt/demonicslots/backend
+# 2. Create the app directory and a dedicated, unprivileged service user
+#    for it FIRST, and fix ownership BEFORE anything writes into it -
+#    this is the step that avoids the EACCES error.
+sudo mkdir -p /srv/nodeapps/demonicslots
+sudo useradd --system --home /srv/nodeapps/demonicslots --shell /usr/sbin/nologin demonicslots || true
+sudo chown -R demonicslots:demonicslots /srv/nodeapps/demonicslots
 
-# 3. systemd service
+# 3. Get the code onto the server and install dependencies. Everything
+#    from here on runs *as the demonicslots user* (via `sudo -u`), so
+#    whatever it creates is already owned correctly - never plain
+#    `npm install` as your own login user or as root against this path.
+sudo git clone <your-repo-url> /srv/nodeapps/demonicslots-src   # or `git pull` if already cloned
+sudo cp -r /srv/nodeapps/demonicslots-src/backend/. /srv/nodeapps/demonicslots/backend/
+sudo chown -R demonicslots:demonicslots /srv/nodeapps/demonicslots/backend
+sudo -u demonicslots cp /srv/nodeapps/demonicslots/backend/.env.example /srv/nodeapps/demonicslots/backend/.env
+sudo -u demonicslots nano /srv/nodeapps/demonicslots/backend/.env   # set ADMIN_TOKEN (openssl rand -hex 32)
+sudo -u demonicslots npm install --omit=dev --prefix /srv/nodeapps/demonicslots/backend
+
+# 4. systemd service
 sudo cp deploy/demonicslots-backend.service /etc/systemd/system/
 sudo systemctl daemon-reload
 sudo systemctl enable --now demonicslots-backend
 sudo systemctl status demonicslots-backend
 
-# 4. Firewall: only nginx (80/443) needs to be reachable from the internet;
+# 5. Firewall: only nginx (80/443) needs to be reachable from the internet;
 #    3007 stays internal to the box, nginx proxies to it over localhost.
 sudo ufw allow 80,443/tcp
 sudo ufw deny 3007
 
-# 5. nginx + TLS (reverse proxy; deploy/nginx.conf.example already has the
+# 6. nginx + TLS (reverse proxy; deploy/nginx.conf.example already has the
 #    right server_name, demonicslots.thedemonlord333.me, filled in)
 sudo cp deploy/nginx.conf.example /etc/nginx/sites-available/demonicslots
 sudo ln -s /etc/nginx/sites-available/demonicslots /etc/nginx/sites-enabled/
@@ -111,6 +131,10 @@ sudo certbot --nginx -d demonicslots.thedemonlord333.me   # issues the cert and
                                         # rewrites the nginx config for HTTPS + redirect
 ```
 
+If you already have a partially-created `/srv/nodeapps/demonicslots` from a
+failed attempt, just re-run step 2's `chown -R` (harmless to repeat) before
+retrying `npm install` - you don't need to delete anything first.
+
 After that, `https://demonicslots.thedemonlord333.me/api/health` should
 return `{"status":"ok",...}` and the app talks to that same URL (not
 directly to port 3007 - nginx/certbot terminate TLS and forward
@@ -118,17 +142,22 @@ internally).
 
 ### Updating after a `git pull`
 
+The `-src` checkout stays root-owned throughout (only the deployed
+`backend/` copy is handed to the `demonicslots` user), so `git clone`/`pull`
+against it always run as root/sudo, never as `demonicslots`:
+
 ```bash
 sudo systemctl stop demonicslots-backend
-sudo -u demonicslots git -C /opt/demonicslots-src pull
-sudo cp -r /opt/demonicslots-src/backend/. /opt/demonicslots/backend/  # keep your existing .env and data/
-sudo -u demonicslots npm install --omit=dev --prefix /opt/demonicslots/backend
+sudo git -C /srv/nodeapps/demonicslots-src pull
+sudo cp -r /srv/nodeapps/demonicslots-src/backend/. /srv/nodeapps/demonicslots/backend/  # keep your existing .env and data/
+sudo chown -R demonicslots:demonicslots /srv/nodeapps/demonicslots/backend
+sudo -u demonicslots npm install --omit=dev --prefix /srv/nodeapps/demonicslots/backend
 sudo systemctl start demonicslots-backend
 ```
 
 ### Backups
 
-Everything lives in one file: `data/demonicslots.sqlite` (plus WAL
-sidecar files while the process is running). Stop the service or use
-`sqlite3 data/demonicslots.sqlite ".backup backup.sqlite"` for a
-consistent snapshot without downtime.
+Everything lives in one file: `/srv/nodeapps/demonicslots/backend/data/demonicslots.sqlite`
+(plus WAL sidecar files while the process is running). Stop the service or
+use `sqlite3 data/demonicslots.sqlite ".backup backup.sqlite"` (run from
+that `backend/` directory) for a consistent snapshot without downtime.

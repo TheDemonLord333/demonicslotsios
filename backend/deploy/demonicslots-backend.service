@@ -4,10 +4,8 @@ After=network.target
 
 [Service]
 Type=simple
-# Adjust these two paths to wherever you cloned the repo and which user
-# should own the process (avoid running as root).
-WorkingDirectory=/opt/demonicslots/backend
-EnvironmentFile=/opt/demonicslots/backend/.env
+WorkingDirectory=/srv/nodeapps/demonicslots/backend
+EnvironmentFile=/srv/nodeapps/demonicslots/backend/.env
 ExecStart=/usr/bin/node src/server.js
 Restart=on-failure
 RestartSec=5
@@ -19,7 +17,7 @@ Group=demonicslots
 NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict
-ReadWritePaths=/opt/demonicslots/backend/data
+ReadWritePaths=/srv/nodeapps/demonicslots/backend/data
 
 [Install]
 WantedBy=multi-user.target
