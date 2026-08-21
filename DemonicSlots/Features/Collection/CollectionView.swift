@@ -23,6 +23,7 @@ struct CollectionView: View {
     @State private var showStatistics = false
     @State private var showSettings = false
     @State private var showInfo = false
+    @State private var showProfile = false
 
     private var balance: Int64 { profiles.first?.soulCoinBalance ?? 0 }
 
@@ -64,10 +65,18 @@ struct CollectionView: View {
             .sheet(isPresented: $showStatistics) { StatisticsView() }
             .sheet(isPresented: $showSettings) { SettingsView() }
             .sheet(isPresented: $showInfo) { InfoView() }
+            .sheet(isPresented: $showProfile) {
+                if let viewModel {
+                    ProfileSheetView(accountSync: viewModel.accountSync)
+                }
+            }
             .onAppear {
                 if viewModel == nil {
                     viewModel = CollectionViewModel(context: modelContext)
                 }
+                // Opportunistic: does nothing if offline or no account is
+                // registered yet, per BackendSyncService's contract.
+                Task { await viewModel?.accountSync.syncSilently() }
             }
         }
         .tint(DemonicPalette.emberOrange)
@@ -95,6 +104,7 @@ struct CollectionView: View {
                         .foregroundStyle(DemonicPalette.boneIvory.opacity(0.6))
                 }
                 Spacer()
+                profileButton
             }
 
             HStack(spacing: 10) {
@@ -113,6 +123,20 @@ struct CollectionView: View {
             .accessibilityElement(children: .combine)
             .accessibilityLabel("Kontostand: \(balance) Soul Coins")
         }
+    }
+
+    private var profileButton: some View {
+        let isRegistered = viewModel?.accountSync.isRegistered ?? false
+        return Button {
+            showProfile = true
+        } label: {
+            Image(systemName: isRegistered ? "person.crop.circle.fill" : "person.crop.circle")
+                .font(.title2)
+                .frame(width: 44, height: 44)
+        }
+        .foregroundStyle(DemonicPalette.boneIvory)
+        .background(.white.opacity(0.06), in: Circle())
+        .accessibilityLabel(isRegistered ? "Profil: \(viewModel?.accountSync.username ?? "")" : "Profil einrichten")
     }
 
     private var toolbarButtons: some View {

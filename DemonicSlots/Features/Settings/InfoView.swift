@@ -21,7 +21,7 @@ struct InfoView: View {
                     )
                     infoSection(
                         title: "Datenschutz",
-                        text: "Demonic Slots läuft vollständig offline, ohne Login, ohne Backend, ohne Werbung und ohne Erfassung personenbezogener Daten."
+                        text: "Demonic Slots funktioniert vollständig offline, ohne Login, ohne Werbung und ohne Erfassung personenbezogener Daten. Optional kannst du im Profil einen frei gewählten Benutzernamen registrieren, um dein Soul-Coin-Guthaben bei Internetverbindung serverseitig zu sichern - das ist freiwillig und für das Spielen nicht erforderlich."
                     )
                     infoSection(
                         title: "Soul Rescue",

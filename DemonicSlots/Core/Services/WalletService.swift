@@ -51,6 +51,16 @@ final class WalletService {
         save()
     }
 
+    /// Force-sets the balance to an exact value, bypassing debit/credit
+    /// semantics entirely. Used only by `AccountSyncController` when the
+    /// backend's admin-authoritative balance must overwrite whatever is
+    /// stored locally - never call this from gameplay code.
+    func setBalance(_ amount: Int64) {
+        let profile = currentProfile()
+        profile.soulCoinBalance = max(0, amount)
+        save()
+    }
+
     // MARK: - Soul Rescue
 
     func isSoulRescueAvailable() -> Bool {

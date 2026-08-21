@@ -17,6 +17,7 @@ final class CollectionViewModel {
     private let context: ModelContext
     let wallet: WalletService
     let registry: GameRegistry
+    let accountSync: AccountSyncController
 
     var showFirstLaunchDisclaimer: Bool
 
@@ -28,6 +29,7 @@ final class CollectionViewModel {
         self.context = context
         self.registry = registry ?? .shared
         self.wallet = WalletService(context: context)
+        self.accountSync = AccountSyncController(context: context, wallet: wallet)
         let profile = wallet.currentProfile()
         self.showFirstLaunchDisclaimer = !profile.hasSeenEntertainmentDisclaimer
         try? context.save()

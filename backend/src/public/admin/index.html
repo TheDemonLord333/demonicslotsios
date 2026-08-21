@@ -1,0 +1,227 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<meta name="robots" content="noindex, nofollow" />
+<title>Demonic Slots · Admin</title>
+<style>
+  :root {
+    color-scheme: dark;
+    --bg: #08070b;
+    --panel: #190e24;
+    --border: #3a2a4a;
+    --text: #e8dec9;
+    --muted: #b8ac95;
+    --accent: #ff7a1a;
+    --danger: #e22d3d;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    background: radial-gradient(circle at top, #190e24, #08070b 65%);
+    color: var(--text);
+    min-height: 100vh;
+    padding: 24px 16px 64px;
+  }
+  h1 { font-size: 1.4rem; letter-spacing: 0.04em; margin: 0 0 4px; }
+  .subtitle { color: var(--muted); margin: 0 0 24px; font-size: 0.9rem; }
+  .card {
+    max-width: 720px;
+    margin: 0 auto 16px;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 18px 20px;
+  }
+  label { display: block; font-size: 0.8rem; color: var(--muted); margin-bottom: 6px; }
+  input {
+    width: 100%;
+    background: #0e0a15;
+    border: 1px solid var(--border);
+    color: var(--text);
+    padding: 10px 12px;
+    border-radius: 8px;
+    font-size: 0.95rem;
+  }
+  input:focus { outline: 2px solid var(--accent); }
+  button {
+    background: var(--accent);
+    color: #1a0a02;
+    border: none;
+    padding: 10px 16px;
+    border-radius: 8px;
+    font-weight: 700;
+    cursor: pointer;
+    font-size: 0.9rem;
+  }
+  button.secondary {
+    background: transparent;
+    color: var(--text);
+    border: 1px solid var(--border);
+  }
+  button:disabled { opacity: 0.5; cursor: default; }
+  .row { display: flex; gap: 10px; align-items: flex-end; flex-wrap: wrap; margin-top: 10px; }
+  .row > div { flex: 1; min-width: 140px; }
+  table { width: 100%; border-collapse: collapse; margin-top: 8px; font-size: 0.9rem; }
+  th, td { text-align: left; padding: 8px 6px; border-bottom: 1px solid var(--border); }
+  th { color: var(--muted); font-weight: 600; font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.04em; }
+  .balance-input { width: 110px; }
+  .status { font-size: 0.82rem; margin-top: 10px; min-height: 1.2em; }
+  .status.error { color: var(--danger); }
+  .status.ok { color: #7CE28A; }
+  .muted { color: var(--muted); }
+</style>
+</head>
+<body>
+  <h1>🔥 Demonic Slots — Admin</h1>
+  <p class="subtitle">Soul-Coin-Guthaben der Spieler ansehen und überschreiben. Jede Änderung hier gewinnt immer gegen einen Offline-Stand auf dem Gerät des Spielers.</p>
+
+  <div class="card">
+    <label for="token">Admin-Token</label>
+    <input id="token" type="password" placeholder="ADMIN_TOKEN aus der .env" autocomplete="off" />
+    <div class="row">
+      <button id="loadButton">Spieler laden</button>
+      <button id="forgetButton" class="secondary" type="button">Token vergessen</button>
+    </div>
+    <div id="loadStatus" class="status"></div>
+  </div>
+
+  <div class="card">
+    <table>
+      <thead>
+        <tr>
+          <th>Username</th>
+          <th>Guthaben</th>
+          <th>Admin-Revision</th>
+          <th>Zuletzt geändert</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody id="playersBody">
+        <tr><td colspan="5" class="muted">Noch keine Daten geladen.</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+<script>
+  const tokenInput = document.getElementById("token");
+  const loadStatus = document.getElementById("loadStatus");
+  const playersBody = document.getElementById("playersBody");
+
+  // Convenience only: keeps the token in this browser tab's memory for the
+  // session (sessionStorage), never sent anywhere except this server.
+  const savedToken = sessionStorage.getItem("demonicSlotsAdminToken");
+  if (savedToken) tokenInput.value = savedToken;
+
+  document.getElementById("forgetButton").addEventListener("click", () => {
+    sessionStorage.removeItem("demonicSlotsAdminToken");
+    tokenInput.value = "";
+    setStatus(loadStatus, "Token vergessen.", false);
+  });
+
+  function setStatus(el, message, isError) {
+    el.textContent = message;
+    el.className = "status " + (isError ? "error" : "ok");
+  }
+
+  async function apiFetch(path, options = {}) {
+    const token = tokenInput.value.trim();
+    const response = await fetch(path, {
+      ...options,
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: "Bearer " + token,
+        ...(options.headers || {}),
+      },
+    });
+    const body = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      throw new Error(body.error || ("HTTP " + response.status));
+    }
+    return body;
+  }
+
+  function renderPlayers(players) {
+    if (!players.length) {
+      playersBody.innerHTML = '<tr><td colspan="5" class="muted">Noch keine Spieler registriert.</td></tr>';
+      return;
+    }
+    playersBody.innerHTML = "";
+    for (const player of players) {
+      const tr = document.createElement("tr");
+
+      const nameTd = document.createElement("td");
+      nameTd.textContent = player.username;
+
+      const balanceTd = document.createElement("td");
+      const balanceInput = document.createElement("input");
+      balanceInput.className = "balance-input";
+      balanceInput.type = "number";
+      balanceInput.min = "0";
+      balanceInput.step = "1";
+      balanceInput.value = player.coinBalance;
+      balanceTd.appendChild(balanceInput);
+
+      const revisionTd = document.createElement("td");
+      revisionTd.textContent = player.adminRevision;
+
+      const updatedTd = document.createElement("td");
+      updatedTd.textContent = new Date(player.updatedAt).toLocaleString("de-DE");
+
+      const actionTd = document.createElement("td");
+      const saveButton = document.createElement("button");
+      saveButton.textContent = "Speichern";
+      const rowStatus = document.createElement("div");
+      rowStatus.className = "status";
+
+      saveButton.addEventListener("click", async () => {
+        const newBalance = Number(balanceInput.value);
+        if (!Number.isInteger(newBalance) || newBalance < 0) {
+          setStatus(rowStatus, "Ungültiges Guthaben.", true);
+          return;
+        }
+        saveButton.disabled = true;
+        try {
+          const updated = await apiFetch(
+            "/api/admin/players/" + encodeURIComponent(player.username) + "/balance",
+            { method: "PATCH", body: JSON.stringify({ balance: newBalance }) }
+          );
+          revisionTd.textContent = updated.adminRevision;
+          updatedTd.textContent = new Date(updated.updatedAt).toLocaleString("de-DE");
+          setStatus(rowStatus, "Gespeichert.", false);
+        } catch (err) {
+          setStatus(rowStatus, "Fehler: " + err.message, true);
+        } finally {
+          saveButton.disabled = false;
+        }
+      });
+
+      actionTd.appendChild(saveButton);
+      actionTd.appendChild(rowStatus);
+
+      tr.append(nameTd, balanceTd, revisionTd, updatedTd, actionTd);
+      playersBody.appendChild(tr);
+    }
+  }
+
+  document.getElementById("loadButton").addEventListener("click", async () => {
+    const token = tokenInput.value.trim();
+    if (!token) {
+      setStatus(loadStatus, "Bitte Admin-Token eingeben.", true);
+      return;
+    }
+    sessionStorage.setItem("demonicSlotsAdminToken", token);
+    setStatus(loadStatus, "Lade…", false);
+    try {
+      const players = await apiFetch("/api/admin/players");
+      renderPlayers(players);
+      setStatus(loadStatus, players.length + " Spieler geladen.", false);
+    } catch (err) {
+      setStatus(loadStatus, "Fehler: " + err.message, true);
+    }
+  });
+</script>
+</body>
+</html>

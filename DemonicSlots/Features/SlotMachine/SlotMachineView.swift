@@ -60,6 +60,7 @@ private struct SlotMachineContentView: View {
     @State private var particleScene = SlotParticleScene(size: CGSize(width: 360, height: 480))
     @State private var hapticsService: HapticsService?
     @State private var audioService: AudioService?
+    @State private var accountSync: AccountSyncController?
 
     private var balance: Int64 { profiles.first?.soulCoinBalance ?? 0 }
     private var settings: UserSettings? { settingsRows.first }
@@ -288,6 +289,7 @@ private struct SlotMachineContentView: View {
         )
         audioService = audio
         audio.startBackgroundMusic(key: definition.audioKeys.background)
+        accountSync = AccountSyncController(context: context, wallet: controller.wallet)
     }
 
     private func toggleAudio() {
@@ -315,7 +317,9 @@ private struct SlotMachineContentView: View {
             hapticsService?.win(intensity: .big)
             particleScene.emitRiftBurst()
         case .idle:
-            break
+            // A spin (or a bonus round) just finished resolving. Opportunistic
+            // and silent: no-ops offline or without a registered account.
+            Task { await accountSync?.syncSilently() }
         default:
             break
         }

@@ -7,6 +7,11 @@
 //  is responsible for creating it on first launch and for every balance
 //  mutation afterwards (never mutate `soulCoinBalance` directly from a view).
 //
+//  The `online*`/`lastKnownAdminRevision` fields are for the optional
+//  backend sync (see `AccountSyncController`/`BackendSyncService`): they
+//  stay nil/0 for a purely offline player and are only ever written by
+//  that sync code, never read/written by gameplay code directly.
+//
 import Foundation
 import SwiftData
 
@@ -19,6 +24,19 @@ final class PlayerProfile {
     var lastSoulRescueDate: Date?
     var hasSeenEntertainmentDisclaimer: Bool
 
+    /// The username claimed on the backend, if any. Nil means this player
+    /// has never registered an online profile - the app remains fully
+    /// playable offline either way.
+    var onlineUsername: String?
+    /// Secret issued by the backend at registration; proves this device
+    /// owns `onlineUsername` on every sync call. Never shown in the UI.
+    var deviceToken: String?
+    /// The backend's `admin_revision` counter as of the last successful
+    /// sync. A mismatch on the next sync means an admin changed the
+    /// balance directly, which must win over anything played offline.
+    var lastKnownAdminRevision: Int64
+    var lastSyncedAt: Date?
+
     // `profileID` defaults to the literal, not `PlayerProfile.singletonID`:
     // default parameter expressions are evaluated in a nonisolated context
     // and can't reference a MainActor-isolated static property. Must stay
@@ -28,13 +46,21 @@ final class PlayerProfile {
         soulCoinBalance: Int64 = 5_000,
         createdAt: Date = .now,
         lastSoulRescueDate: Date? = nil,
-        hasSeenEntertainmentDisclaimer: Bool = false
+        hasSeenEntertainmentDisclaimer: Bool = false,
+        onlineUsername: String? = nil,
+        deviceToken: String? = nil,
+        lastKnownAdminRevision: Int64 = 0,
+        lastSyncedAt: Date? = nil
     ) {
         self.profileID = profileID
         self.soulCoinBalance = soulCoinBalance
         self.createdAt = createdAt
         self.lastSoulRescueDate = lastSoulRescueDate
         self.hasSeenEntertainmentDisclaimer = hasSeenEntertainmentDisclaimer
+        self.onlineUsername = onlineUsername
+        self.deviceToken = deviceToken
+        self.lastKnownAdminRevision = lastKnownAdminRevision
+        self.lastSyncedAt = lastSyncedAt
     }
 
     static let singletonID = "player.singleton"
