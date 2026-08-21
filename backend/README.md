@@ -99,6 +99,18 @@ No separate copy/staging step, no second checkout - one clone, one place.
 >    interactively), `su demonicslots` or `sudo -u demonicslots -s` won't
 >    work either - always prefix each individual command with
 >    `sudo -u demonicslots <command...>` instead.
+> 3. **`systemctl start` fails with `Result: resources`** (check
+>    `journalctl -xeu demonicslots-backend.service` to confirm) almost
+>    always means a path in `ReadWritePaths=` doesn't exist yet.
+>    `deploy/demonicslots-backend.service` uses `ProtectSystem=strict`,
+>    which makes the whole filesystem read-only except for
+>    `ReadWritePaths=.../backend/data` - systemd needs that directory to
+>    already exist so it can bind-mount it as the one writable exception;
+>    it won't create it for you, and the Node process never gets far
+>    enough to create it itself under the sandbox. Fix: `mkdir` it (as
+>    `demonicslots`) before starting the service - step 3 below does this;
+>    if you already hit this, just run that `mkdir`/`chown` line and
+>    `sudo systemctl restart demonicslots-backend`.
 
 ```bash
 # 1. System packages (build tools only needed if better-sqlite3 can't use
@@ -115,7 +127,10 @@ sudo useradd --system --home /srv/nodeapps/demonicslotsios --shell /usr/sbin/nol
 sudo chown -R demonicslots:demonicslots /srv/nodeapps/demonicslotsios
 
 # 3. .env + dependencies, run as the demonicslots user (see footgun #2
-#    above - every command needs the `sudo -u demonicslots` prefix)
+#    above - every command needs the `sudo -u demonicslots` prefix).
+#    The `mkdir -p .../data` matters - see footgun #3 above; it's a
+#    no-op if that directory already exists (e.g. from git).
+sudo -u demonicslots mkdir -p /srv/nodeapps/demonicslotsios/backend/data
 sudo -u demonicslots cp /srv/nodeapps/demonicslotsios/backend/.env.example /srv/nodeapps/demonicslotsios/backend/.env
 sudo -u demonicslots nano /srv/nodeapps/demonicslotsios/backend/.env   # set ADMIN_TOKEN (openssl rand -hex 32)
 sudo -u demonicslots npm install --omit=dev --prefix /srv/nodeapps/demonicslotsios/backend

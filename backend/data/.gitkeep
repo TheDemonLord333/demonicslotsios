@@ -1,0 +1,12 @@
+This file only exists so git tracks the (otherwise empty) data/ directory.
+
+The actual database file (demonicslots.sqlite, plus its WAL sidecar files)
+is created here at runtime and is gitignored - see ../.gitignore.
+
+This directory existing on disk *before* the systemd service starts
+matters: deploy/demonicslots-backend.service uses ProtectSystem=strict
+with ReadWritePaths pointing at this directory, and systemd needs that
+path to already exist to bind-mount it as the one writable exception in
+an otherwise read-only filesystem view. If it doesn't exist yet, the
+service fails to start with "Result: resources" (see backend/README.md's
+troubleshooting note).
