@@ -153,28 +153,84 @@ private struct SlotMachineContentView: View {
     }
 
     private var infoRow: some View {
-        HStack {
-            VStack(alignment: .leading, spacing: 2) {
-                Text("Letzter Gewinn")
-                    .font(.caption2)
-                    .foregroundStyle(DemonicPalette.boneIvory.opacity(0.6))
-                Text("\(controller.lastWinAmount)")
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(DemonicPalette.boneIvory)
-            }
-            Spacer()
+        VStack(spacing: 8) {
+            winStatsRow
             if controller.isInBonusRound {
-                VStack(alignment: .trailing, spacing: 2) {
-                    Text("Freispiele")
-                        .font(.caption2)
-                        .foregroundStyle(DemonicPalette.boneIvory.opacity(0.6))
-                    Text("\(controller.remainingFreeSpins)")
-                        .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(DemonicPalette.glowingViolet)
-                }
+                freeSpinsBadge
             }
         }
+    }
+
+    /// Three win figures side by side: the sticky last non-zero win on the
+    /// left, this round's result emphasized in the middle, and the
+    /// all-time single-spin high score on the right.
+    private var winStatsRow: some View {
+        HStack(alignment: .bottom, spacing: 8) {
+            winStatColumn(
+                title: "Letzter Gewinn",
+                value: controller.lastNonZeroWinAmount,
+                frameAlignment: .leading,
+                valueFont: .subheadline.weight(.semibold),
+                valueColor: DemonicPalette.boneIvory.opacity(0.85)
+            )
+
+            winStatColumn(
+                title: "Aktueller Gewinn",
+                value: controller.lastWinAmount,
+                frameAlignment: .center,
+                valueFont: .title.weight(.heavy),
+                valueColor: controller.lastWinAmount > 0 ? DemonicPalette.emberOrange : DemonicPalette.boneIvory
+            )
+            .shadow(color: (controller.lastWinAmount > 0 ? DemonicPalette.emberOrange : .clear).opacity(0.7), radius: 10)
+            .layoutPriority(1)
+
+            winStatColumn(
+                title: "Highscore",
+                value: controller.highScoreWin,
+                frameAlignment: .trailing,
+                valueFont: .subheadline.weight(.semibold),
+                valueColor: DemonicPalette.glowingViolet
+            )
+        }
         .accessibilityElement(children: .combine)
+        .accessibilityLabel(
+            "Letzter Gewinn \(controller.lastNonZeroWinAmount) Coins, " +
+            "aktueller Gewinn \(controller.lastWinAmount) Coins, " +
+            "Highscore \(controller.highScoreWin) Coins"
+        )
+    }
+
+    private func winStatColumn(
+        title: String,
+        value: Int64,
+        frameAlignment: Alignment,
+        valueFont: Font,
+        valueColor: Color
+    ) -> some View {
+        VStack(alignment: frameAlignment.horizontal, spacing: 2) {
+            Text(title)
+                .font(.caption2)
+                .foregroundStyle(DemonicPalette.boneIvory.opacity(0.6))
+            Text("\(value)")
+                .font(valueFont)
+                .foregroundStyle(valueColor)
+                .contentTransition(.numericText())
+                .lineLimit(1)
+                .minimumScaleFactor(0.55)
+        }
+        .frame(maxWidth: .infinity, alignment: frameAlignment)
+    }
+
+    private var freeSpinsBadge: some View {
+        HStack(spacing: 6) {
+            Image(systemName: "sparkles")
+            Text("Freispiele: \(controller.remainingFreeSpins)")
+                .font(.caption.weight(.semibold))
+        }
+        .foregroundStyle(DemonicPalette.glowingViolet)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 4)
+        .background(DemonicPalette.glowingViolet.opacity(0.15), in: Capsule())
     }
 
     private var spinButton: some View {
