@@ -46,6 +46,11 @@ const statements = {
     SET coin_balance = @coinBalance, admin_revision = admin_revision + 1, updated_at = @now
     WHERE username = @username
   `),
+  renameByAdmin: db.prepare(`
+    UPDATE players
+    SET username = @newUsername, display_name = @newDisplayName, updated_at = @now
+    WHERE username = @oldUsername
+  `),
   listAll: db.prepare("SELECT * FROM players ORDER BY updated_at DESC"),
 };
 
@@ -81,6 +86,25 @@ function setBalanceFromAdmin(rawUsername, coinBalance) {
   return findByUsername(rawUsername);
 }
 
+/**
+ * Renames a player: updates both the canonical (lowercased) lookup key and
+ * the display name. Deliberately does NOT touch coin_balance or
+ * admin_revision - those are a separate concern (see setBalanceFromAdmin).
+ * device_token is also untouched, so the same device stays linked to the
+ * account; see routes/players.js's /sync device-token fallback for why
+ * that matters.
+ */
+function renamePlayerByAdmin(rawOldUsername, rawNewUsername) {
+  const now = new Date().toISOString();
+  statements.renameByAdmin.run({
+    oldUsername: canonicalUsername(rawOldUsername),
+    newUsername: canonicalUsername(rawNewUsername),
+    newDisplayName: rawNewUsername,
+    now,
+  });
+  return findByUsername(rawNewUsername);
+}
+
 function listAllPlayers() {
   return statements.listAll.all();
 }
@@ -93,5 +117,6 @@ module.exports = {
   createPlayer,
   setBalanceFromClient,
   setBalanceFromAdmin,
+  renamePlayerByAdmin,
   listAllPlayers,
 };
