@@ -149,11 +149,16 @@
       return;
     }
     playersBody.innerHTML = "";
-    for (const player of players) {
+    for (let player of players) {
       const tr = document.createElement("tr");
 
       const nameTd = document.createElement("td");
-      nameTd.textContent = player.username;
+      const nameInput = document.createElement("input");
+      nameInput.className = "balance-input";
+      nameInput.type = "text";
+      nameInput.maxLength = 20;
+      nameInput.value = player.username;
+      nameTd.appendChild(nameInput);
 
       const balanceTd = document.createElement("td");
       const balanceInput = document.createElement("input");
@@ -182,12 +187,29 @@
           setStatus(rowStatus, "Ungültiges Guthaben.", true);
           return;
         }
+        const newName = nameInput.value.trim();
+        if (!/^[A-Za-z0-9_]{3,20}$/.test(newName)) {
+          setStatus(rowStatus, "Username muss 3-20 Zeichen sein (Buchstaben, Zahlen, _).", true);
+          return;
+        }
+
         saveButton.disabled = true;
         try {
+          // Rename first (if changed) - the balance PATCH below has to
+          // target whatever the player's username is *now*.
+          if (newName !== player.username) {
+            player = await apiFetch(
+              "/api/admin/players/" + encodeURIComponent(player.username) + "/username",
+              { method: "PATCH", body: JSON.stringify({ username: newName }) }
+            );
+            nameInput.value = player.username;
+          }
+
           const updated = await apiFetch(
             "/api/admin/players/" + encodeURIComponent(player.username) + "/balance",
             { method: "PATCH", body: JSON.stringify({ balance: newBalance }) }
           );
+          player = updated;
           revisionTd.textContent = updated.adminRevision;
           updatedTd.textContent = new Date(updated.updatedAt).toLocaleString("de-DE");
           setStatus(rowStatus, "Gespeichert.", false);
