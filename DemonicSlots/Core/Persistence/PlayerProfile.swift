@@ -34,7 +34,14 @@ final class PlayerProfile {
     /// The backend's `admin_revision` counter as of the last successful
     /// sync. A mismatch on the next sync means an admin changed the
     /// balance directly, which must win over anything played offline.
-    var lastKnownAdminRevision: Int64
+    // `= 0` here (not just in `init` below) matters: SwiftData's automatic
+    // lightweight migration needs a default *on the property declaration*
+    // to add a new non-optional column to an existing on-disk store -
+    // without it, opening a store created before this field existed throws
+    // and `PersistenceController.makeModelContainer()` crashes via
+    // `fatalError`. The optional fields around it don't need this since a
+    // missing optional column just migrates to nil.
+    var lastKnownAdminRevision: Int64 = 0
     var lastSyncedAt: Date?
 
     // `profileID` defaults to the literal, not `PlayerProfile.singletonID`:

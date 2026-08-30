@@ -31,7 +31,15 @@ final class SpinSessionController {
     private(set) var state: SlotMachineState = .idle
     var selectedBetPerLine: Int64
     private(set) var currentEvaluation: SpinEvaluation?
+    /// Result of the most recently *completed* spin - updated after every
+    /// spin, including to `0` for a non-winning round. This is "Aktueller
+    /// Gewinn" in the UI.
     private(set) var lastWinAmount: Int64 = 0
+    /// The most recent payout that was actually greater than `0`, sticky
+    /// across non-winning rounds in between. This is "Letzter Gewinn" in
+    /// the UI - deliberately distinct from `lastWinAmount`, which does
+    /// reset to `0`.
+    private(set) var lastNonZeroWinAmount: Int64 = 0
     private(set) var lastBetPerLineUsed: Int64 = 0
     private(set) var isInBonusRound: Bool = false
     private(set) var remainingFreeSpins: Int = 0
@@ -66,6 +74,13 @@ final class SpinSessionController {
 
     var canSpin: Bool {
         state == .idle
+    }
+
+    /// The largest single-round payout ever recorded for this game,
+    /// persisted via `GameStatistics` so it survives an app restart. This
+    /// is "Gewinn-Highscore" in the UI.
+    var highScoreWin: Int64 {
+        statistics.largestSingleWin
     }
 
     var totalBet: Int64 {
@@ -158,6 +173,7 @@ final class SpinSessionController {
         state = .evaluating
         let payout = transactionService.finalizeSpin(pending: pending, evaluation: evaluation, statistics: statistics)
         lastWinAmount = payout
+        if payout > 0 { lastNonZeroWinAmount = payout }
 
         var enteredBonus = false
         var bonusEnded = false

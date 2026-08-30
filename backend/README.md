@@ -100,24 +100,53 @@ No separate copy/staging step, no second checkout - one clone, one place.
 >    interactively), `su demonicslots` or `sudo -u demonicslots -s` won't
 >    work either - always prefix each individual command with
 >    `sudo -u demonicslots <command...>` instead.
-> 3. **`systemctl start` fails with `Result: resources`** has two possible
->    causes, in order of likelihood:
->    1. A path in `ReadWritePaths=` doesn't exist yet - `mkdir` it (as
->       `demonicslots`) before starting the service; step 3 below does
->       this.
->    2. The host itself won't grant the service a new mount namespace at
->       all, which `PrivateTmp`/`ProtectSystem=strict`/`ReadWritePaths`
->       all need - common on virtualized/restricted "root servers"
->       (OpenVZ, some LXC setups). If restarting after (1) still fails
->       identically, this is almost certainly it: run
->       `journalctl -xeu demonicslots-backend.service --no-pager | tail -30`
->       to confirm (look for `namespace`/`mount` in the error), then drop
->       those three directives from `deploy/demonicslots-backend.service`
->       (keep `NoNewPrivileges=true` - that one's a plain syscall, not a
->       namespace, and works everywhere) and
->       `sudo cp deploy/demonicslots-backend.service /etc/systemd/system/ && sudo systemctl daemon-reload && sudo systemctl restart demonicslots-backend`.
->       The already-current version of that file in the repo has this
->       pre-applied.
+> 3. **`systemctl start` fails with `Result: resources`** is systemd's
+>    generic bucket for "couldn't even get the process running", so it
+>    covers a few unrelated causes - **always check the real reason
+>    first**, don't guess:
+>    ```
+>    journalctl -xeu demonicslots-backend.service --no-pager | tail -30
+>    ```
+>    Look for a `systemd[1]:` line right above `Failed with result
+>    'resources'` - that's the actual cause. The two seen so far:
+>    - **`Failed to load environment files: No such file or directory`**
+>      - `EnvironmentFile=.../backend/.env` doesn't exist. Unlike
+>        `ExecStart`, systemd treats a missing `EnvironmentFile=` as fatal
+>        (there's an optional `-`-prefixed form, deliberately not used
+>        here since `ADMIN_TOKEN` is required). Fix: create it - step 3
+>        below does this (`cp .env.example .env` then set `ADMIN_TOKEN`).
+>    - A path in `ReadWritePaths=` doesn't exist yet - `mkdir` it (as
+>      `demonicslots`); step 3 below does this too.
+>
+>    A third possibility if the journal instead mentions `namespace` or
+>    `mount`: the host won't grant the service a new mount namespace at
+>    all, which `PrivateTmp`/`ProtectSystem=strict`/`ReadWritePaths` all
+>    need - happens on some virtualized/restricted "root servers" (OpenVZ,
+>    certain LXC setups). `deploy/demonicslots-backend.service` no longer
+>    uses any of those three directives for exactly this reason (kept only
+>    `NoNewPrivileges=true`, a plain syscall rather than a namespace
+>    operation) - if you're on an older copy of the unit file,
+>    `sudo git -C /srv/nodeapps/demonicslotsios pull` and re-install it.
+>
+>    If you just ran that `git pull` and the failure looks identical to
+>    before (same paths in `journalctl`, `EnvironmentFile=` pointing
+>    somewhere that doesn't exist) - **check that the pull actually did
+>    anything**. `git status`/`git pull` run as root against a checkout
+>    that's owned by `demonicslots` (step 2's `chown -R` covers the whole
+>    repo, `.git/` included) fails outright since Git 2.35, with
+>    `fatal: detected dubious ownership in repository at ...`, and that
+>    fatal error is easy to miss if it's buried in a block of other
+>    commands. When that happens the working tree is silently left exactly
+>    as it was, so every later `cp .../deploy/demonicslots-backend.service
+>    /etc/systemd/system/` faithfully re-installs the same stale file and
+>    you get the exact same `journalctl` output as before, forever. Fix
+>    once, as root:
+>    ```
+>    sudo git config --global --add safe.directory /srv/nodeapps/demonicslotsios
+>    ```
+>    then re-run `git pull` - it now needs to actually print updated file
+>    names (or `Already up to date.`), not a `fatal:` line, before you
+>    trust anything it changed.
 
 ```bash
 # 1. System packages (build tools only needed if better-sqlite3 can't use
@@ -175,13 +204,21 @@ internally).
 
 `git pull` always runs as root/sudo, never as `demonicslots` (that account
 can't log in interactively - see footgun #2 above, and it doesn't need
-write access to `.git/` anyway):
+write access to `.git/` anyway). The very first time you do this against a
+checkout that's already been `chown -R demonicslots`'d (step 2), Git
+refuses with `fatal: detected dubious ownership in repository at ...` -
+run the `git config` line below once (harmless to repeat) to fix that
+permanently, see footgun #3 above for why it happens:
 
 ```bash
+sudo git config --global --add safe.directory /srv/nodeapps/demonicslotsios
+
 sudo systemctl stop demonicslots-backend
-sudo git -C /srv/nodeapps/demonicslotsios pull
+sudo git -C /srv/nodeapps/demonicslotsios pull   # must print changed files or "Already up to date.", not a fatal: line
 sudo chown -R demonicslots:demonicslots /srv/nodeapps/demonicslotsios   # pull re-creates files as root - fix ownership again
 sudo -u demonicslots npm install --omit=dev --prefix /srv/nodeapps/demonicslotsios/backend
+sudo cp /srv/nodeapps/demonicslotsios/backend/deploy/demonicslots-backend.service /etc/systemd/system/   # unit file may have changed too
+sudo systemctl daemon-reload
 sudo systemctl start demonicslots-backend
 ```
 
