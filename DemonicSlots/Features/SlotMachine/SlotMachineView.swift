@@ -165,11 +165,18 @@ private struct SlotMachineContentView: View {
     /// left, this round's result emphasized in the middle, and the
     /// all-time single-spin high score on the right.
     private var winStatsRow: some View {
+        // The side columns get a fixed width and the center one is the only
+        // `.frame(maxWidth: .infinity)` view in the row, so it alone claims
+        // the remaining space - giving it *also* a competing flexible frame
+        // (as an earlier version of this did, via `.layoutPriority`) made it
+        // greedily take the whole row's width before the sides were even
+        // asked, squeezing "Letzter Gewinn"/"Highscore" down to nothing.
         HStack(alignment: .bottom, spacing: 8) {
             winStatColumn(
                 title: "Letzter Gewinn",
                 value: controller.lastNonZeroWinAmount,
                 frameAlignment: .leading,
+                fixedWidth: 92,
                 valueFont: .subheadline.weight(.semibold),
                 valueColor: DemonicPalette.boneIvory.opacity(0.85)
             )
@@ -178,16 +185,17 @@ private struct SlotMachineContentView: View {
                 title: "Aktueller Gewinn",
                 value: controller.lastWinAmount,
                 frameAlignment: .center,
+                fixedWidth: nil,
                 valueFont: .title.weight(.heavy),
                 valueColor: controller.lastWinAmount > 0 ? DemonicPalette.emberOrange : DemonicPalette.boneIvory
             )
             .shadow(color: (controller.lastWinAmount > 0 ? DemonicPalette.emberOrange : .clear).opacity(0.7), radius: 10)
-            .layoutPriority(1)
 
             winStatColumn(
                 title: "Highscore",
                 value: controller.highScoreWin,
                 frameAlignment: .trailing,
+                fixedWidth: 92,
                 valueFont: .subheadline.weight(.semibold),
                 valueColor: DemonicPalette.glowingViolet
             )
@@ -200,14 +208,16 @@ private struct SlotMachineContentView: View {
         )
     }
 
+    @ViewBuilder
     private func winStatColumn(
         title: String,
         value: Int64,
         frameAlignment: Alignment,
+        fixedWidth: CGFloat?,
         valueFont: Font,
         valueColor: Color
     ) -> some View {
-        VStack(alignment: frameAlignment.horizontal, spacing: 2) {
+        let label = VStack(alignment: frameAlignment.horizontal, spacing: 2) {
             Text(title)
                 .font(.caption2)
                 .foregroundStyle(DemonicPalette.boneIvory.opacity(0.6))
@@ -218,7 +228,11 @@ private struct SlotMachineContentView: View {
                 .lineLimit(1)
                 .minimumScaleFactor(0.55)
         }
-        .frame(maxWidth: .infinity, alignment: frameAlignment)
+        if let fixedWidth {
+            label.frame(width: fixedWidth, alignment: frameAlignment)
+        } else {
+            label.frame(maxWidth: .infinity, alignment: frameAlignment)
+        }
     }
 
     private var freeSpinsBadge: some View {
