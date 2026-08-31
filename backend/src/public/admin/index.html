@@ -195,18 +195,19 @@
 
         saveButton.disabled = true;
         try {
-          // Rename first (if changed) - the balance PATCH below has to
-          // target whatever the player's username is *now*.
+          // Both calls address the player by their stable id, so order
+          // between rename and balance doesn't matter here the way it used
+          // to when the URL itself was keyed by the (changing) username.
           if (newName !== player.username) {
             player = await apiFetch(
-              "/api/admin/players/" + encodeURIComponent(player.username) + "/username",
+              "/api/admin/players/" + encodeURIComponent(player.id) + "/username",
               { method: "PATCH", body: JSON.stringify({ username: newName }) }
             );
             nameInput.value = player.username;
           }
 
           const updated = await apiFetch(
-            "/api/admin/players/" + encodeURIComponent(player.username) + "/balance",
+            "/api/admin/players/" + encodeURIComponent(player.id) + "/balance",
             { method: "PATCH", body: JSON.stringify({ balance: newBalance }) }
           );
           player = updated;

@@ -57,10 +57,17 @@ All request/response bodies are JSON.
 | `GET /api/health` | none | Liveness check |
 | `POST /api/players/register` | none | Claim a username. Body: `{ "username": "TheDemonLord333", "initialBalance": 5000 }`. `409 username_taken` if already claimed (case-insensitive). Returns `{ username, coinBalance, adminRevision, deviceToken }` - **the app must store `deviceToken` locally**, it's the secret that authenticates every future sync call for this username (there is no password). |
 | `POST /api/players/sync` | device token in body | Body: `{ "username", "deviceToken", "localBalance", "lastKnownAdminRevision" }`. Returns `{ resolution: "server_wins" \| "client_applied", username, coinBalance, adminRevision, updatedAt }` per the conflict rule above. `403 invalid_device_token` if the token doesn't match that username. If `username` doesn't resolve to any player, falls back to a device-token lookup before giving up (`404 not_found`) - covers a device syncing under a username an admin has since renamed via the endpoint below. |
-| `GET /api/admin/players` | `Authorization: Bearer <ADMIN_TOKEN>` | List every registered player. |
-| `GET /api/admin/players/:username` | same | One player's current state. |
-| `PATCH /api/admin/players/:username/balance` | same | Body: `{ "balance": 12345 }`. Sets the balance **and increments `admin_revision`** - this is the call your "weitere App" makes. |
-| `PATCH /api/admin/players/:username/username` | same | Body: `{ "username": "NewName" }` (same 3-20 char, letters/digits/underscore format as registration). Renames the player - `404 not_found` if `:username` doesn't exist, `409 username_taken` if the new name is already claimed (case-insensitive), `400 invalid_username` for a bad format. Does **not** touch `coin_balance`/`admin_revision`, and `device_token` is untouched too, so the player's device keeps syncing under the hood (see the `/sync` fallback above) - only that device's locally *displayed* name may lag until it next reads a fresh username back from a sync response. |
+| `GET /api/admin/players` | `Authorization: Bearer <ADMIN_TOKEN>` | List every registered player. Each entry now includes a stable `id` - use it, not `username`, to address a specific player in the endpoints below. |
+| `GET /api/admin/players/:id` | same | One player's current state, looked up by their stable `id`. |
+| `PATCH /api/admin/players/:id/balance` | same | Body: `{ "balance": 12345 }`. Sets the balance **and increments `admin_revision`** - this is the call your "weitere App" makes. |
+| `PATCH /api/admin/players/:id/username` | same | Body: `{ "username": "NewName" }` (same 3-20 char, letters/digits/underscore format as registration). Renames the player - `404 not_found` if `:id` doesn't exist, `409 username_taken` if the new name is already claimed by a *different* player (case-insensitive), `400 invalid_username` for a bad format. Does **not** touch `coin_balance`/`admin_revision`, and `device_token` is untouched too, so the player's device keeps syncing under the hood (see the `/sync` fallback above) - only that device's locally *displayed* name may lag until it next reads a fresh username back from a sync response. |
+
+`id` is a stable identifier assigned once at registration and never
+changes - it's the actual primary key now (`username` is just a mutable
+label on it, which is what makes renaming safe: nothing else has to be
+found, moved, or re-pointed). Player-facing endpoints (`/api/players/*`)
+are unchanged and still address players by `username`/`deviceToken`, since
+the app doesn't need to know about `id` for anything it currently does.
 
 A minimal built-in admin page is served at `/admin` (e.g.
 `https://demonicslots.thedemonlord333.me/admin`) - paste your `ADMIN_TOKEN`

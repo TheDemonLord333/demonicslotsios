@@ -123,10 +123,10 @@ router.post("/sync", (req, res) => {
     });
   }
 
-  // Use the resolved player's own (current) username for the write, not
-  // the possibly-stale one the device sent - matters exactly when the
-  // fallback above kicked in after a rename.
-  const updated = setBalanceFromClient(player.username, localBalance);
+  // Write keyed by the player's immutable id, never by username - matters
+  // exactly when the fallback above kicked in after a rename, where the
+  // username the device sent no longer names this row at all.
+  const updated = setBalanceFromClient(player.id, localBalance);
   return res.status(200).json({
     resolution: "client_applied",
     ...serializePlayer(updated),
