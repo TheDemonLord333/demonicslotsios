@@ -43,4 +43,12 @@ final class HapticsService {
         guard isEnabledProvider() else { return }
         UISelectionFeedbackGenerator().selectionChanged()
     }
+
+    /// A failure/loss moment (e.g. a missed Risk Ladder climb). Distinct
+    /// from `win(intensity: .big)`, which uses the `.success` notification
+    /// feedback - this is the `.error` one.
+    func loss() {
+        guard isEnabledProvider() else { return }
+        UINotificationFeedbackGenerator().notificationOccurred(.error)
+    }
 }

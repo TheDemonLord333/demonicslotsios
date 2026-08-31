@@ -17,6 +17,7 @@ enum PersistenceController {
             GameStatistics.self,
             PendingSpin.self,
             UserSettings.self,
+            RiskLadderRoundState.self,
         ])
     }
 
@@ -91,6 +92,19 @@ enum ProfileStore {
             return existing
         }
         let created = GameStatistics(gameID: rawID)
+        context.insert(created)
+        return created
+    }
+
+    static func fetchOrCreateRiskLadderRoundState(for gameID: GameID, in context: ModelContext) -> RiskLadderRoundState {
+        let rawID = gameID.rawValue
+        let descriptor = FetchDescriptor<RiskLadderRoundState>(
+            predicate: #Predicate { $0.gameID == rawID }
+        )
+        if let existing = try? context.fetch(descriptor).first {
+            return existing
+        }
+        let created = RiskLadderRoundState(gameID: rawID)
         context.insert(created)
         return created
     }

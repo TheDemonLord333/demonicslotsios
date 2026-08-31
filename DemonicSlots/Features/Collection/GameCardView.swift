@@ -71,6 +71,7 @@ struct GameCardView: View {
     private var portalSymbolName: String {
         switch definition.id {
         case InfernalForgeDefinition.gameID: return "flame.circle.fill"
+        case RiskLadderDefinition.gameID: return "bolt.circle.fill"
         default: return "circle.hexagongrid.circle.fill"
         }
     }

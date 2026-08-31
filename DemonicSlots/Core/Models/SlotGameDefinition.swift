@@ -14,6 +14,16 @@ nonisolated struct SlotGameDefinition: Codable, Equatable, Sendable, Identifiabl
     var displayName: String
     var shortDescription: String
     var availability: GameAvailability
+    /// Which feature view `CollectionView` opens this card into. Defaults
+    /// to `.slotMachine` so every existing call site (Infernal Forge, the
+    /// `ComingSoonGames` placeholders) needs no change - only
+    /// `RiskLadderDefinition` passes `.riskLadder` explicitly. Every field
+    /// below this point (reels, paylines, symbols, wild/scatter, free-spin
+    /// rules) is meaningless for a non-slot game and is populated with
+    /// minimal-but-structurally-valid placeholder data for one, the same
+    /// way `ComingSoonGames` already does for cards that aren't a real
+    /// slot machine either.
+    var kind: CasinoGameKind
     var theme: GameTheme
     var symbols: [SlotSymbol]
     /// One strip of symbol IDs per reel, read cyclically.
@@ -48,12 +58,14 @@ nonisolated struct SlotGameDefinition: Codable, Equatable, Sendable, Identifiabl
         freeSpinsRules: FreeSpinsRules?,
         cardAssetKey: String,
         audioKeys: SlotAudioKeys,
-        animationKeys: SlotAnimationKeys
+        animationKeys: SlotAnimationKeys,
+        kind: CasinoGameKind = .slotMachine
     ) {
         self.id = id
         self.displayName = displayName
         self.shortDescription = shortDescription
         self.availability = availability
+        self.kind = kind
         self.theme = theme
         self.symbols = symbols
         self.reelStrips = reelStrips

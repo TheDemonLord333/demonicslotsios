@@ -1,16 +1,31 @@
 # Demonic Slots
 
-Eine Sammlung dämonisch-thematischer Slot-Spiele für iOS. Version 1 enthält
-ein vollständig spielbares Spiel, **Infernal Forge** (5 Walzen, 3 Reihen, 10
-feste Gewinnlinien, Wild, Scatter/Freispiele), aufgebaut auf einer
-wiederverwendbaren Slot-Engine. Drei weitere Spiele (**Blood Cathedral**,
-**Abyssal Crypt**, **Cursed Carnival**) sind als "Bald verfügbar" in der
-Spielesammlung sichtbar, aber noch nicht implementiert.
+Eine Sammlung dämonisch-thematischer Casino-Spiele für iOS. Aktuell
+vollständig spielbar sind zwei eigenständige Spiele, die sich dasselbe
+globale Soul-Coin-Guthaben teilen:
+
+- **Infernal Forge** - ein klassischer Slot (5 Walzen, 3 Reihen, 10 feste
+  Gewinnlinien, Wild, Scatter/Freispiele), aufgebaut auf einer
+  wiederverwendbaren Slot-Engine (`Core/Engine`).
+- **Demonic Risk Ladder** - eine dämonische Risikoleiter: Einsatz wählen,
+  Stufe für Stufe klettern (steigender Multiplikator, sinkende
+  Erfolgschance) und jederzeit den aktuellen Gewinn nehmen oder weiter
+  riskieren, bis Verlust, Cash-out oder der automatisch ausgezahlte
+  Jackpot die Runde beendet (`Core/Services/RiskLadderSessionController`,
+  `Core/Engine/RiskLadderEngine`).
+
+Drei weitere Spiele (**Blood Cathedral**, **Abyssal Crypt**, **Cursed
+Carnival**) sind als "Bald verfügbar" in der Spielesammlung sichtbar, aber
+noch nicht implementiert.
 
 > **Nur zur Unterhaltung. Kein Echtgeld, keine Gewinne und keine Auszahlung
 > möglich.** Alle Einsätze/Gewinne bestehen ausschließlich aus virtuellen
-> Soul Coins ohne realen Geldwert. Kein Login, kein Backend, keine
-> In-App-Käufe, keine Werbung, keine Lootboxen, vollständig offline.
+> Soul Coins ohne realen Geldwert. Keine In-App-Käufe, keine Werbung, keine
+> Lootboxen. Das Spiel funktioniert vollständig offline; optional kann ein
+> Spieler einen einmaligen Benutzernamen registrieren, damit sein
+> Guthaben zusätzlich mit einem eigenen Backend (`backend/`) synchronisiert
+> wird - siehe `backend/README.md`. Ohne Registrierung ändert sich am
+> rein lokalen Verhalten nichts.
 
 ## Technische Eckdaten
 
@@ -34,21 +49,29 @@ DemonicSlots/
     Engine/                RNG-Wrapper, ReelSpinner, PaylineEvaluator, ScatterEvaluator,
                             SlotEngine, SlotSimulator (DEBUG)
     Persistence/            SwiftData-Modelle (PlayerProfile, GameProgress,
-                            GameStatistics, PendingSpin, UserSettings) + PersistenceController
+                            GameStatistics, PendingSpin, RiskLadderRoundState,
+                            UserSettings) + PersistenceController
     Services/               GameRegistry, WalletService, SpinTransactionService,
-                            SpinSessionController (Zustandsautomat), Haptics/Audio/DateProvider
+                            SpinSessionController/RiskLadderSessionController
+                            (je ein Zustandsautomat), Haptics/Audio/DateProvider
   Features/
-    Collection/             Spielhalle (Startbildschirm, liest aus GameRegistry)
+    Collection/             Spielhalle (Startbildschirm, liest aus GameRegistry,
+                            routet je nach SlotGameDefinition.kind)
     SlotMachine/             Walzenfeld, Einsatzsteuerung, Paytable-Sheet, Partikelebene
+    RiskLadder/              Leiter-Ansicht, Einsatzsteuerung, Ergebnis-Overlays
     Statistics/              Globale + Pro-Spiel-Statistiken
     Settings/                Audio/Haptik/Bewegung, Reset, RTP-Simulation (DEBUG)
   Games/
     InfernalForge/          Konkrete SlotGameDefinition für Infernal Forge
+    RiskLadder/              RiskLadderDefinition (Katalogeintrag) + zentrale
+                            RiskLadderConfiguration (Stufen/Multiplikatoren/Odds)
     ComingSoonGames.swift    Platzhalter-Definitionen für zukünftige Spiele
   Resources/Games/InfernalForge/  Asset-Key-Dokumentation für spätere Artwork/Audio
+  Resources/Games/RiskLadder/      Audio-Assets/Dokumentation für Demonic Risk Ladder
   Shared/                  Farbpalette, Color(hex:)-Helper
 DemonicSlotsTests/
-  Core/                    Unit-Tests für Engine, Wallet, Persistenz, Registry
+  Core/                    Unit-Tests für Engine, Wallet, Persistenz, Registry,
+                            RiskLadderEngine/RiskLadderSessionController
 ```
 
 **Ein neues Spiel hinzufügen**, ohne die Engine oder Navigation anzufassen:
@@ -64,6 +87,17 @@ DemonicSlotsTests/
    funktionieren unverändert, da sie ausschließlich über `SlotGameDefinition`
    und `GameRegistry` arbeiten. `GameRegistryTests` demonstriert das anhand
    eines Mock-Spiels.
+
+**Ein Spiel hinzufügen, das kein Slot ist** (wie Demonic Risk Ladder): auch
+das läuft über dieselbe `GameRegistry`/`SlotGameDefinition`-Registrierung -
+`SlotGameDefinition.kind` (`.slotMachine` per Default, `.riskLadder` für die
+Risikoleiter) sagt `CollectionView`s einziger `.navigationDestination`, auf
+welche Feature-View sie routet. Reel-/Payline-/Symbol-Felder, die für das
+neue Spiel keine Bedeutung haben, werden minimal-aber-valide befüllt, exakt
+wie `ComingSoonGames` es für seine Platzhalter schon tut; `betLevels` bleibt
+in jedem Fall die echte, wiederverwendete Einsatzstufen-Liste. Es entsteht
+dabei **keine** zweite Navigation und **keine** zweite `GameRegistry` -
+siehe `RiskLadderDefinition.swift` als Vorlage.
 
 ## Bauen & Testen
 
@@ -112,6 +146,17 @@ gemessen und nachjustiert:
 4. Die fertige App zeigt **keinen** festen RTP-Wert an, solange er nicht
    durch diese Simulation bestätigt wurde.
 
+## Demonic Risk Ladder konfigurieren
+
+Stufenanzahl, Multiplikatoren und Erfolgswahrscheinlichkeiten sind zentral
+in `RiskLadderConfiguration.levels` definiert (`[RiskLevel]`, je Stufe
+`level`/`multiplier`/`successProbability`/`isJackpot`) - nirgendwo sonst im
+Code steht eine Zahl fest verdrahtet. Wie bei den Infernal-Forge-Gewichten
+ist die Startkonfiguration ein Ausgangswert, kein gemessenes Ergebnis;
+`RiskLadderEngineTests` prüft Auszahlungs-/Rundungslogik sowie (mit
+`SeededRandomSource`, hoher Stichprobenzahl) dass die beobachtete
+Erfolgsquote einer Stufe ungefähr der konfigurierten entspricht.
+
 ## Wichtige Spielregeln (Kurzreferenz)
 
 - Guthaben/Einsätze/Gewinne ausschließlich `Int64`, niemals negativ, niemals
@@ -129,3 +174,14 @@ gemessen und nachjustiert:
 - Soul Rescue: unter 10 Soul Coins einmal pro Kalendertag 1.000 Soul Coins
   gratis (`WalletService.claimSoulRescue()`), Datum über injizierbaren
   `DateProvider` testbar.
+- Demonic Risk Ladder ist genauso transaktionssicher, nur ohne eine
+  `PendingSpin`-Warteschlange: `RiskLadderRoundState` hält immer höchstens
+  eine aktive Runde pro Spiel fest (`isActive`/`stakeDebited`/`stake`/
+  `currentLevel`). Der Einsatz wird beim Start genau einmal abgebucht;
+  danach ist nichts mehr zu verlieren, was nicht schon abgebucht wurde -
+  ein Neustart mittendrin setzt die Runde exakt an der zuletzt erreichten
+  Stufe fort, statt den Einsatz zu erstatten oder erneut abzuziehen. Jede
+  Auszahlung (Cash-out, Jackpot) setzt `state` synchron aus `.ready` heraus,
+  *bevor* die eigentliche Gutschrift läuft, damit ein schnelles
+  Doppel-Tippen nie doppelt auszahlt - `RiskLadderSessionControllerTests`
+  deckt genau das ab.

@@ -215,7 +215,12 @@ struct CollectionView: View {
         }
         .navigationDestination(for: GameID.self) { gameID in
             if let definition = viewModel.registry.definition(for: gameID), definition.availability == .available {
-                SlotMachineView(definition: definition, plugin: viewModel.registry.plugin(for: gameID))
+                switch definition.kind {
+                case .slotMachine:
+                    SlotMachineView(definition: definition, plugin: viewModel.registry.plugin(for: gameID))
+                case .riskLadder:
+                    RiskLadderView(definition: definition)
+                }
             }
         }
     }

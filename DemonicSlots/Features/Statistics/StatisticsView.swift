@@ -30,12 +30,15 @@ struct StatisticsView: View {
 
                 ForEach(sortedStatistics) { stats in
                     Section(displayName(forRawGameID: stats.gameID)) {
-                        LabeledContent("Spins", value: "\(stats.totalSpins)")
+                        LabeledContent(isRiskLadder(stats.gameID) ? "Runden" : "Spins", value: "\(stats.totalSpins)")
                         LabeledContent("Gewinnquote", value: percent(stats.winRate))
                         LabeledContent("Gesamteinsatz", value: "\(stats.totalWagered) Soul Coins")
                         LabeledContent("Gesamtgewinn", value: "\(stats.totalWon) Soul Coins")
                         LabeledContent("Größter Einzelgewinn", value: "\(stats.largestSingleWin) Soul Coins")
-                        LabeledContent("Bonusrunden ausgelöst", value: "\(stats.bonusRoundsTriggered)")
+                        LabeledContent(isRiskLadder(stats.gameID) ? "Jackpots erreicht" : "Bonusrunden ausgelöst", value: "\(stats.bonusRoundsTriggered)")
+                        if stats.highestMultiplierPercent > 0 {
+                            LabeledContent("Höchster Multiplikator", value: multiplierString(stats.highestMultiplierPercent))
+                        }
                     }
                 }
 
@@ -62,8 +65,17 @@ struct StatisticsView: View {
         registry.definition(for: GameID(rawID))?.displayName ?? rawID
     }
 
+    private func isRiskLadder(_ rawID: String) -> Bool {
+        registry.definition(for: GameID(rawID))?.kind == .riskLadder
+    }
+
     private func percent(_ value: Double) -> String {
         String(format: "%.1f%%", value * 100)
+    }
+
+    /// `percent` is `multiplier * 100` (e.g. `150` -> "x1.5").
+    private func multiplierString(_ percent: Int64) -> String {
+        String(format: "x%.2f", Double(percent) / 100)
     }
 }
 
