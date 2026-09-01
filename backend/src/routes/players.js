@@ -4,6 +4,7 @@ const express = require("express");
 const crypto = require("node:crypto");
 const {
   findByUsername,
+  findByDeviceToken,
   createPlayer,
   setBalanceFromClient,
 } = require("../db");
@@ -103,7 +104,17 @@ router.post("/sync", (req, res) => {
     return res.status(400).json({ error: "invalid_request" });
   }
 
-  const player = findByUsername(username);
+  let player = findByUsername(username);
+  if (!player) {
+    // The username this device last knew about doesn't resolve anymore -
+    // most likely an admin renamed this player since the last sync (see
+    // routes/admin.js's PATCH .../:id, which never changes device_token
+    // even when the request includes a new username). Fall back to
+    // looking the player up by their device token so a rename doesn't lock
+    // the app out of syncing; the response below already reports the
+    // player's current (new) username.
+    player = findByDeviceToken(deviceToken);
+  }
   if (!player) {
     return res.status(404).json({ error: "not_found" });
   }
@@ -120,7 +131,10 @@ router.post("/sync", (req, res) => {
     });
   }
 
-  const updated = setBalanceFromClient(username, localBalance);
+  // Write keyed by the player's immutable id, never by username - matters
+  // exactly when the fallback above kicked in after a rename, where the
+  // username the device sent no longer names this row at all.
+  const updated = setBalanceFromClient(player.id, localBalance);
   return res.status(200).json({
     resolution: "client_applied",
     ...serializePlayer(updated),

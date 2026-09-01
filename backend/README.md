@@ -85,10 +85,17 @@ All request/response bodies are JSON.
 |---|---|---|
 | `GET /api/health` | none | Liveness check |
 | `POST /api/players/register` | none | Claim a username. Body: `{ "username": "TheDemonLord333", "initialBalance": 5000 }`. `409 username_taken` if already claimed (case-insensitive). Returns `{ username, coinBalance, adminRevision, level, winChanceMultiplier, deviceToken }` - **the app must store `deviceToken` locally**, it's the secret that authenticates every future sync call for this username (there is no password). New players start at `level: 1`, `winChanceMultiplier: 1.0`. |
-| `POST /api/players/sync` | device token in body | Body: `{ "username", "deviceToken", "localBalance", "lastKnownAdminRevision" }`. Returns `{ resolution: "server_wins" \| "client_applied", username, coinBalance, adminRevision, level, winChanceMultiplier, updatedAt }` per the conflict rule above. `level`/`winChanceMultiplier` are always the current server values regardless of `resolution` - they're never part of the coin-balance conflict. `403 invalid_device_token` if the token doesn't match that username. |
-| `GET /api/admin/players` | `Authorization: Bearer <ADMIN_TOKEN>` | List every registered player (includes `level`, `winChanceMultiplier`). |
-| `GET /api/admin/players/:username` | same | One player's current state. |
-| `PATCH /api/admin/players/:username` | same | Body: any non-empty subset of `{ "balance": 12345, "level": 20, "winChanceMultiplier": 1.15 }` - send only the field(s) you're changing. Setting `balance` **increments `admin_revision`**; setting `level`/`winChanceMultiplier` does not (see "Player progression" above for why). `400 invalid_level`/`invalid_win_chance_multiplier`/`invalid_balance` for an out-of-range value, `400 no_fields_to_update` for an empty body. This is the one call your "weitere App" needs for all three fields. |
+| `POST /api/players/sync` | device token in body | Body: `{ "username", "deviceToken", "localBalance", "lastKnownAdminRevision" }`. Returns `{ resolution: "server_wins" \| "client_applied", username, coinBalance, adminRevision, level, winChanceMultiplier, updatedAt }` per the conflict rule above. `level`/`winChanceMultiplier` are always the current server values regardless of `resolution` - they're never part of the coin-balance conflict. `403 invalid_device_token` if the token doesn't match that username. If `username` doesn't resolve to any player, falls back to a device-token lookup before giving up (`404 not_found`) - covers a device syncing under a username an admin has since renamed via the endpoint below. |
+| `GET /api/admin/players` | `Authorization: Bearer <ADMIN_TOKEN>` | List every registered player. Each entry carries a stable `id` - use it, not `username`, to address a specific player in the endpoint below - plus `level`/`winChanceMultiplier`. |
+| `GET /api/admin/players/:id` | same | One player's current state, looked up by their stable `id`. |
+| `PATCH /api/admin/players/:id` | same | Body: any non-empty subset of `{ "username": "NewName", "balance": 12345, "level": 20, "winChanceMultiplier": 1.15 }` - send only the field(s) you're changing, addressed by the player's stable `id` (a rename never has to touch or re-find anything else, unlike keying off the mutable username). Setting `balance` **increments `admin_revision`**; setting `username`/`level`/`winChanceMultiplier` does not (see "Player progression" above for why). `404 not_found` if `:id` doesn't exist, `409 username_taken` if the new username is already claimed by a *different* player (case-insensitive), `400 invalid_username`/`invalid_level`/`invalid_win_chance_multiplier`/`invalid_balance` for an out-of-range value, `400 no_fields_to_update` for an empty body. This is the one call your admin app needs for all four fields. |
+
+`id` is a stable identifier assigned once at registration and never
+changes - it's the actual primary key now (`username` is just a mutable
+label on it, which is what makes renaming safe: nothing else has to be
+found, moved, or re-pointed). Player-facing endpoints (`/api/players/*`)
+are unchanged and still address players by `username`/`deviceToken`, since
+the app doesn't need to know about `id` for anything it currently does.
 
 A minimal built-in admin page is served at `/admin` (e.g.
 `https://demonicslots.thedemonlord333.me/admin`) - paste your `ADMIN_TOKEN`

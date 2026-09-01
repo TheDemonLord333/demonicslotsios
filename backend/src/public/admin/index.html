@@ -153,11 +153,16 @@
       return;
     }
     playersBody.innerHTML = "";
-    for (const player of players) {
+    for (let player of players) {
       const tr = document.createElement("tr");
 
       const nameTd = document.createElement("td");
-      nameTd.textContent = player.username;
+      const nameInput = document.createElement("input");
+      nameInput.className = "balance-input";
+      nameInput.type = "text";
+      nameInput.maxLength = 20;
+      nameInput.value = player.username;
+      nameTd.appendChild(nameInput);
 
       const balanceTd = document.createElement("td");
       const balanceInput = document.createElement("input");
@@ -205,14 +210,20 @@
       // admin_revision on every save (even a level-only edit), which would
       // wrongly make the app discard real gameplay balance changes on its
       // next sync.
+      let knownUsername = player.username;
       let knownBalance = player.coinBalance;
       let knownLevel = player.level;
       let knownMultiplier = player.winChanceMultiplier;
 
       saveButton.addEventListener("click", async () => {
+        const newName = nameInput.value.trim();
         const newBalance = Number(balanceInput.value);
         const newLevel = Number(levelInput.value);
         const newMultiplier = Number(multiplierInput.value);
+        if (!/^[A-Za-z0-9_]{3,20}$/.test(newName)) {
+          setStatus(rowStatus, "Username muss 3-20 Zeichen sein (Buchstaben, Zahlen, _).", true);
+          return;
+        }
         if (!Number.isInteger(newBalance) || newBalance < 0) {
           setStatus(rowStatus, "Ungültiges Guthaben.", true);
           return;
@@ -227,6 +238,7 @@
         }
 
         const body = {};
+        if (newName !== knownUsername) body.username = newName;
         if (newBalance !== knownBalance) body.balance = newBalance;
         if (newLevel !== knownLevel) body.level = newLevel;
         if (newMultiplier !== knownMultiplier) body.winChanceMultiplier = newMultiplier;
@@ -237,13 +249,19 @@
 
         saveButton.disabled = true;
         try {
+          // One PATCH addressed by the player's stable id covers every
+          // field at once - a rename in the same request never races the
+          // balance/level/multiplier part of the update.
           const updated = await apiFetch(
-            "/api/admin/players/" + encodeURIComponent(player.username),
+            "/api/admin/players/" + encodeURIComponent(player.id),
             { method: "PATCH", body: JSON.stringify(body) }
           );
+          player = updated;
+          knownUsername = updated.username;
           knownBalance = updated.coinBalance;
           knownLevel = updated.level;
           knownMultiplier = updated.winChanceMultiplier;
+          nameInput.value = updated.username;
           balanceInput.value = updated.coinBalance;
           levelInput.value = updated.level;
           multiplierInput.value = updated.winChanceMultiplier;
