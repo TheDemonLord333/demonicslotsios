@@ -22,14 +22,23 @@ see the iOS README's "Player progression" section for how they're actually
 used in-game. As far as this backend is concerned, both are just two more
 server-authoritative fields on a player:
 
-- **Read-only from the app's side.** `register`/`sync` return them, but the
-  app never sends a `level`/`winChanceMultiplier` value *to* the server -
-  there's no gameplay path that changes them, only an admin edit does.
-  That's why setting one never touches `admin_revision`: that counter
-  exists purely to arbitrate a *coin balance* conflict between "what the
-  device played locally" and "what an admin set directly", and a
-  level/multiplier edit isn't a competing write in the first place - the
-  device just picks up the new value on its very next sync.
+- **`win_chance_multiplier` is admin-only**, full stop - there's no
+  gameplay path that changes it, only an admin edit does.
+- **`level` is admin-settable, and separately app-earnable via XP.** The
+  app tracks its own `totalXP` purely client-side (1 XP per Soul Coin
+  wagered - see the iOS README's "XP" section) and, once that justifies a
+  higher level than the server has on file, claims it via an optional
+  `earnedLevel` field on `POST /api/players/sync` (see the API table
+  below). The server applies `newLevel = max(currentLevel, earnedLevel)` -
+  a claim can only ever raise the stored level, never lower it, so an
+  admin boost above what a player has actually earned by playing is never
+  walked back just by continuing to play.
+- Setting `level`/`win_chance_multiplier` - whether via an admin edit or a
+  client's `earnedLevel` claim - never touches `admin_revision`: that
+  counter exists purely to arbitrate a *coin balance* conflict between
+  "what the device played locally" and "what an admin set directly", and
+  neither is a competing write against the balance - the device just
+  picks up the new value on its very next sync either way.
 - **Defaults for every existing player**: `level = 1`,
   `win_chance_multiplier = 1.0`, added by an automatic, idempotent
   migration in `db.js` (`ALTER TABLE ... ADD COLUMN ... DEFAULT ...`,
@@ -85,7 +94,7 @@ All request/response bodies are JSON.
 |---|---|---|
 | `GET /api/health` | none | Liveness check |
 | `POST /api/players/register` | none | Claim a username. Body: `{ "username": "TheDemonLord333", "initialBalance": 5000 }`. `409 username_taken` if already claimed (case-insensitive). Returns `{ username, coinBalance, adminRevision, level, winChanceMultiplier, deviceToken }` - **the app must store `deviceToken` locally**, it's the secret that authenticates every future sync call for this username (there is no password). New players start at `level: 1`, `winChanceMultiplier: 1.0`. |
-| `POST /api/players/sync` | device token in body | Body: `{ "username", "deviceToken", "localBalance", "lastKnownAdminRevision" }`. Returns `{ resolution: "server_wins" \| "client_applied", username, coinBalance, adminRevision, level, winChanceMultiplier, updatedAt }` per the conflict rule above. `level`/`winChanceMultiplier` are always the current server values regardless of `resolution` - they're never part of the coin-balance conflict. `403 invalid_device_token` if the token doesn't match that username. If `username` doesn't resolve to any player, falls back to a device-token lookup before giving up (`404 not_found`) - covers a device syncing under a username an admin has since renamed via the endpoint below. |
+| `POST /api/players/sync` | device token in body | Body: `{ "username", "deviceToken", "localBalance", "lastKnownAdminRevision", "earnedLevel"? }`. `earnedLevel` is optional - the app's own claim (from local XP) that it has earned a level above what the server has; ignored if missing, not an integer in `1...100`, or not actually higher than the stored level (never an error either way, just a silent no-op). Returns `{ resolution: "server_wins" \| "client_applied", username, coinBalance, adminRevision, level, winChanceMultiplier, updatedAt }` per the conflict rule above. `level`/`winChanceMultiplier` (reflecting any accepted `earnedLevel` claim) are always the current server values regardless of `resolution` - neither is part of the coin-balance conflict. `403 invalid_device_token` if the token doesn't match that username. If `username` doesn't resolve to any player, falls back to a device-token lookup before giving up (`404 not_found`) - covers a device syncing under a username an admin has since renamed via the endpoint below. |
 | `GET /api/admin/players` | `Authorization: Bearer <ADMIN_TOKEN>` | List every registered player. Each entry carries a stable `id` - use it, not `username`, to address a specific player in the endpoint below - plus `level`/`winChanceMultiplier`. |
 | `GET /api/admin/players/:id` | same | One player's current state, looked up by their stable `id`. |
 | `PATCH /api/admin/players/:id` | same | Body: any non-empty subset of `{ "username": "NewName", "balance": 12345, "level": 20, "winChanceMultiplier": 1.15 }` - send only the field(s) you're changing, addressed by the player's stable `id` (a rename never has to touch or re-find anything else, unlike keying off the mutable username). Setting `balance` **increments `admin_revision`**; setting `username`/`level`/`winChanceMultiplier` does not (see "Player progression" above for why). `404 not_found` if `:id` doesn't exist, `409 username_taken` if the new username is already claimed by a *different* player (case-insensitive), `400 invalid_username`/`invalid_level`/`invalid_win_chance_multiplier`/`invalid_balance` for an out-of-range value, `400 no_fields_to_update` for an empty body. This is the one call your admin app needs for all four fields. |

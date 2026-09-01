@@ -7,14 +7,25 @@ const {
   findByDeviceToken,
   createPlayer,
   setBalanceFromClient,
+  updatePlayerFields,
 } = require("../db");
 
 const router = express.Router();
 
 const USERNAME_PATTERN = /^[A-Za-z0-9_]{3,20}$/;
 
+// Same bounds as routes/admin.js's isValidLevel - kept in sync deliberately,
+// see that file's comment on why the server enforces this itself rather
+// than trusting whatever a client (admin app or the game) sends.
+const MIN_LEVEL = 1;
+const MAX_LEVEL = 100;
+
 function isValidUsername(value) {
   return typeof value === "string" && USERNAME_PATTERN.test(value);
+}
+
+function isValidLevel(value) {
+  return typeof value === "number" && Number.isInteger(value) && value >= MIN_LEVEL && value <= MAX_LEVEL;
 }
 
 /** Must be a non-negative integer that fits safely in a JS number (the app
@@ -82,7 +93,7 @@ router.post("/register", (req, res) => {
 
 /**
  * POST /api/players/sync
- * body: { username, deviceToken, localBalance, lastKnownAdminRevision }
+ * body: { username, deviceToken, localBalance, lastKnownAdminRevision, earnedLevel? }
  *
  * The full bidirectional conflict-resolution round trip in one call:
  *
@@ -93,9 +104,17 @@ router.post("/register", (req, res) => {
  *    local value with it.
  *  - Otherwise nothing admin-side has changed, so the client's local
  *    balance (which reflects actual gameplay) is written to the server.
+ *
+ * `earnedLevel` (optional) is the app's own claim, from
+ * PlayerProgressionService.level(forTotalXP:), that local play has earned
+ * a higher level than the server currently has on file. Applied to *both*
+ * branches above (it isn't part of the balance conflict at all - see
+ * applyEarnedLevel below) and only ever raises the stored level, never
+ * lowers it, so an admin-set level above the player's own XP pace is never
+ * walked back just by playing.
  */
 router.post("/sync", (req, res) => {
-  const { username, deviceToken, localBalance, lastKnownAdminRevision } = req.body ?? {};
+  const { username, deviceToken, localBalance, lastKnownAdminRevision, earnedLevel } = req.body ?? {};
 
   if (!isValidUsername(username) || typeof deviceToken !== "string" || !deviceToken) {
     return res.status(400).json({ error: "invalid_request" });
@@ -127,7 +146,7 @@ router.post("/sync", (req, res) => {
     // unconditionally. Don't touch the stored balance at all.
     return res.status(200).json({
       resolution: "server_wins",
-      ...serializePlayer(player),
+      ...serializePlayer(applyEarnedLevel(player, earnedLevel)),
     });
   }
 
@@ -137,8 +156,21 @@ router.post("/sync", (req, res) => {
   const updated = setBalanceFromClient(player.id, localBalance);
   return res.status(200).json({
     resolution: "client_applied",
-    ...serializePlayer(updated),
+    ...serializePlayer(applyEarnedLevel(updated, earnedLevel)),
   });
 });
+
+/** Applies a client's XP-earned level claim, if it's valid and actually
+ * higher than what's already stored - silently ignored otherwise (a
+ * missing/malformed/lower claim is not an error, just a no-op: most sync
+ * calls carry no claim at all). Never bumps admin_revision - a level-up
+ * isn't a competing write against the coin balance, see the /sync doc
+ * comment above. */
+function applyEarnedLevel(player, earnedLevel) {
+  if (!isValidLevel(earnedLevel) || earnedLevel <= player.level) {
+    return player;
+  }
+  return updatePlayerFields(player.id, { level: earnedLevel });
+}
 
 module.exports = router;

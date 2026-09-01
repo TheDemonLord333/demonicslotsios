@@ -19,6 +19,19 @@ nonisolated enum PlayerLevelConfiguration {
     static let minimumLevel = 1
     static let maximumLevel = 100
 
+    /// XP cost of the step from level N to level N+1 is `xpStep * N` (see
+    /// `PlayerProgressionService.cumulativeXPRequired(forLevel:)` for the
+    /// closed-form total) - a plain triangular ramp, cheap early on and
+    /// steadily more expensive later, with no further tuning per level
+    /// needed. 1 XP is earned per Soul Coin wagered (see
+    /// `WalletService.awardXP`), so at this starting configuration: level 2
+    /// costs 500 total wagered, level 10 (the win-bonus table's cap above)
+    /// costs 22,500, level 30 (the top bet tier below) costs 217,500, and
+    /// the absolute level 100 cap costs 2,475,000 - a long-term ceiling by
+    /// design. Starting configuration, not a measured result - retune this
+    /// one number to make the whole curve faster/slower.
+    static let xpStep: Int64 = 500
+
     /// Win-chance bonus per level, dense from level 1 through the last
     /// explicitly tuned level. A level above the table's highest entry
     /// keeps that entry's multiplier (`PlayerProgressionService.

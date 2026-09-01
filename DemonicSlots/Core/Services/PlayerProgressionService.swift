@@ -105,6 +105,58 @@ nonisolated enum PlayerProgressionService {
         (multiplier - 1) * 100
     }
 
+    // MARK: - XP / leveling
+
+    /// Cumulative total XP required to have reached `level` (`level 1`
+    /// needs `0` - everyone starts there). Triangular growth: the step
+    /// from N to N+1 costs `xpStep * N`, so the sum for 1...level-1 is
+    /// `xpStep * level * (level - 1) / 2`. See `PlayerLevelConfiguration.
+    /// xpStep`'s comment for what this looks like at a few levels.
+    static func cumulativeXPRequired(forLevel level: Int) -> Int64 {
+        let safeLevel = Int64(validatedLevel(level))
+        let step = PlayerLevelConfiguration.xpStep
+        return step * safeLevel * (safeLevel - 1) / 2
+    }
+
+    /// The highest level `totalXP` alone would justify, clamped to
+    /// `1...maximumLevel` - purely "what has this player earned by
+    /// playing", independent of whatever `level` is actually stored right
+    /// now (which might be higher, from an admin boost). `AccountSyncController`
+    /// is the only caller that compares this against the stored level to
+    /// decide whether to ask the backend for a level-up.
+    static func level(forTotalXP totalXP: Int64) -> Int {
+        let safeXP = max(totalXP, 0)
+        var candidate = minimumLevel
+        while candidate < maximumLevel, cumulativeXPRequired(forLevel: candidate + 1) <= safeXP {
+            candidate += 1
+        }
+        return candidate
+    }
+
+    /// Progress toward the level *above* `currentLevel`, for a progress
+    /// bar: how much XP has been earned since reaching `currentLevel`
+    /// (`xpIntoLevel`), how much the next level costs from there
+    /// (`xpForNextLevel`), and the resulting `0...1` fraction. `nil` at
+    /// `maximumLevel` (nothing left to progress toward).
+    ///
+    /// Deliberately keyed off the *stored* `currentLevel` - which might sit
+    /// above what `totalXP` alone would earn, after an admin boost - not
+    /// `level(forTotalXP:)`. That keeps the bar meaning "progress toward
+    /// the next level above what this player's level actually is right
+    /// now", never a confusing "already 400% past this bar" reading right
+    /// after a boost: `xpIntoLevel` clamps to `0` until real play XP
+    /// actually catches back up to the boosted level's own threshold.
+    static func xpProgress(totalXP: Int64, currentLevel: Int) -> (xpIntoLevel: Int64, xpForNextLevel: Int64, fraction: Double)? {
+        let safeLevel = validatedLevel(currentLevel)
+        guard safeLevel < maximumLevel else { return nil }
+        let safeXP = max(totalXP, 0)
+        let floor = cumulativeXPRequired(forLevel: safeLevel)
+        let ceiling = cumulativeXPRequired(forLevel: safeLevel + 1)
+        let span = max(ceiling - floor, 1)
+        let into = min(max(safeXP - floor, 0), span)
+        return (xpIntoLevel: into, xpForNextLevel: span, fraction: Double(into) / Double(span))
+    }
+
     // MARK: - Bet limits
 
     /// The global max bet unlocked at `level` - the highest bet tier whose

@@ -58,6 +58,32 @@ struct WalletServiceTests {
         #expect(wallet.balance >= 0)
     }
 
+    @Test func newPlayerStartsWithZeroXP() {
+        let wallet = WalletService(context: makeContext())
+        #expect(wallet.currentProfile().totalXP == 0)
+    }
+
+    @Test func awardXPAccumulatesAcrossCalls() {
+        let wallet = WalletService(context: makeContext())
+        wallet.awardXP(500)
+        wallet.awardXP(250)
+        #expect(wallet.currentProfile().totalXP == 750)
+    }
+
+    @Test func awardXPIsANoOpForZeroOrNegativeAmounts() {
+        let wallet = WalletService(context: makeContext())
+        wallet.awardXP(0)
+        wallet.awardXP(-100)
+        #expect(wallet.currentProfile().totalXP == 0)
+    }
+
+    @Test func awardXPClampsAtInt64MaxInsteadOfOverflowing() {
+        let wallet = WalletService(context: makeContext())
+        wallet.awardXP(Int64.max)
+        wallet.awardXP(1_000)
+        #expect(wallet.currentProfile().totalXP == Int64.max)
+    }
+
     @Test func soulRescueIsOnlyAvailableBelowThresholdAndOncePerCalendarDay() {
         let fixedNow = Date(timeIntervalSince1970: 1_700_000_000)
         let wallet = WalletService(context: makeContext(), dateProvider: FixedDateProvider(fixedDate: fixedNow))

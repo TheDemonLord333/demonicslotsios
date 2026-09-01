@@ -113,6 +113,7 @@ final class SpinTransactionService {
 
         let wager = pending.isFreeSpin ? 0 : pending.totalBet
         statistics.record(wager: wager, payout: evaluation.totalPayout, triggeredBonus: evaluation.isBonusTriggering)
+        wallet.awardXP(wager)
 
         context.delete(pending)
         try? context.save()

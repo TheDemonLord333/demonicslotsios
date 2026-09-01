@@ -24,6 +24,21 @@ final class WalletService {
         ProfileStore.fetchOrCreateProfile(in: context)
     }
 
+    /// Adds `amount` toward the player's level-progression XP (see
+    /// `PlayerProfile.totalXP`/`PlayerProgressionService`) - the wagered
+    /// amount, in Soul Coins, 1:1. No-op for `amount <= 0` (a free spin's
+    /// wager is `0`, matching `GameStatistics.record(wager:)`'s own
+    /// convention of not counting free spins toward wagered totals - a
+    /// free spin already cost no stake, so it earns no XP either). Saved
+    /// immediately, same as every other `PlayerProfile` mutation here.
+    func awardXP(_ amount: Int64) {
+        guard amount > 0 else { return }
+        let profile = currentProfile()
+        let (sum, overflowed) = profile.totalXP.addingReportingOverflow(amount)
+        profile.totalXP = overflowed ? Int64.max : sum
+        save()
+    }
+
     var balance: Int64 { currentProfile().soulCoinBalance }
 
     func canAfford(_ amount: Int64) -> Bool {

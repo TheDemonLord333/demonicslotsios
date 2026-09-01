@@ -278,6 +278,7 @@ final class RiskLadderSessionController {
         }
         let multiplierPercent: Int64? = currentLevel > 0 ? RiskLadderEngine.multiplierPercent(level: currentLevel, configuration: levels) : nil
         statistics.record(wager: activeStake, payout: payout, triggeredBonus: reachedJackpot, multiplierPercent: multiplierPercent)
+        wallet.awardXP(activeStake)
 
         roundState.reset()
         try? context.save()
