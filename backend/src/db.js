@@ -20,11 +20,28 @@ db.exec(`
     display_name    TEXT NOT NULL,                   -- original casing as the player typed it
     device_token    TEXT NOT NULL UNIQUE,             -- secret issued at registration; authenticates sync calls
     coin_balance    INTEGER NOT NULL,                 -- Soul Coins (fits in SQLite's 64-bit INTEGER, matches Int64 in the app)
-    admin_revision  INTEGER NOT NULL DEFAULT 0,        -- bumped ONLY by an admin edit; drives conflict resolution
+    admin_revision  INTEGER NOT NULL DEFAULT 0,        -- bumped ONLY by an admin edit to coin_balance; drives conflict resolution
     created_at      TEXT NOT NULL,
     updated_at      TEXT NOT NULL
   );
 `);
+
+// Migration: add the player-progression columns to a database created
+// before they existed, without touching any existing row's username,
+// display_name, device_token, coin_balance, admin_revision or timestamps.
+// `CREATE TABLE IF NOT EXISTS` above only handles a brand-new database - an
+// existing `players` table needs its own `ALTER TABLE` here, run once and
+// guarded by `PRAGMA table_info` so it's a no-op on every later startup.
+// SQLite applies an `ALTER TABLE ... ADD COLUMN ... DEFAULT x` to every
+// existing row immediately, so this is exactly the "existing users get
+// level = 1 / win_chance_multiplier = 1.0, nothing else changes" migration.
+const existingColumns = new Set(db.prepare("PRAGMA table_info(players)").all().map((col) => col.name));
+if (!existingColumns.has("level")) {
+  db.exec("ALTER TABLE players ADD COLUMN level INTEGER NOT NULL DEFAULT 1");
+}
+if (!existingColumns.has("win_chance_multiplier")) {
+  db.exec("ALTER TABLE players ADD COLUMN win_chance_multiplier REAL NOT NULL DEFAULT 1.0");
+}
 
 /** Canonical uniqueness key: usernames only collide case-insensitively. */
 function canonicalUsername(rawUsername) {
@@ -40,11 +57,6 @@ const statements = {
   `),
   setBalanceFromClient: db.prepare(`
     UPDATE players SET coin_balance = @coinBalance, updated_at = @now WHERE username = @username
-  `),
-  setBalanceFromAdmin: db.prepare(`
-    UPDATE players
-    SET coin_balance = @coinBalance, admin_revision = admin_revision + 1, updated_at = @now
-    WHERE username = @username
   `),
   listAll: db.prepare("SELECT * FROM players ORDER BY updated_at DESC"),
 };
@@ -75,9 +87,39 @@ function setBalanceFromClient(rawUsername, coinBalance) {
   return findByUsername(rawUsername);
 }
 
-function setBalanceFromAdmin(rawUsername, coinBalance) {
-  const now = new Date().toISOString();
-  statements.setBalanceFromAdmin.run({ username: canonicalUsername(rawUsername), coinBalance, now });
+/**
+ * The one write path for everything an admin (eventually the separate admin
+ * app) is allowed to change directly: coin balance, level, and/or
+ * win_chance_multiplier - any subset, since a PATCH only sends the fields
+ * being changed. `admin_revision` only bumps when `coinBalance` is part of
+ * the update: it exists purely to tell a syncing device "your pending local
+ * balance is stale, an admin changed it directly" - a level or multiplier
+ * edit doesn't touch the balance at all, so it must never trigger that
+ * conflict-resolution path (the client picks up a changed level/multiplier
+ * on its very next `/sync` regardless, no revision needed for those).
+ */
+function updatePlayerFields(rawUsername, { coinBalance, level, winChanceMultiplier } = {}) {
+  if (coinBalance === undefined && level === undefined && winChanceMultiplier === undefined) {
+    return findByUsername(rawUsername);
+  }
+
+  const assignments = ["updated_at = @now"];
+  const params = { username: canonicalUsername(rawUsername), now: new Date().toISOString() };
+
+  if (coinBalance !== undefined) {
+    assignments.push("coin_balance = @coinBalance", "admin_revision = admin_revision + 1");
+    params.coinBalance = coinBalance;
+  }
+  if (level !== undefined) {
+    assignments.push("level = @level");
+    params.level = level;
+  }
+  if (winChanceMultiplier !== undefined) {
+    assignments.push("win_chance_multiplier = @winChanceMultiplier");
+    params.winChanceMultiplier = winChanceMultiplier;
+  }
+
+  db.prepare(`UPDATE players SET ${assignments.join(", ")} WHERE username = @username`).run(params);
   return findByUsername(rawUsername);
 }
 
@@ -92,6 +134,6 @@ module.exports = {
   findByDeviceToken,
   createPlayer,
   setBalanceFromClient,
-  setBalanceFromAdmin,
+  updatePlayerFields,
   listAllPlayers,
 };

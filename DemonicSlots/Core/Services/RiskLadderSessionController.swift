@@ -55,7 +55,6 @@ final class RiskLadderSessionController {
         self.statistics = ProfileStore.fetchOrCreateStatistics(for: definition.id, in: context)
         self.randomSource = randomSource
         self.levels = levels
-        self.selectedStake = definition.betLevels.first?.perLine ?? 10
 
         if roundState.isActive, roundState.stakeDebited {
             // The app was killed mid-round after the stake was taken but
@@ -71,6 +70,16 @@ final class RiskLadderSessionController {
             roundState.reset()
             try? context.save()
         }
+
+        // Defensive, same reasoning as `SpinSessionController`: fall back to
+        // the highest still-unlocked stake if the player's level was
+        // lowered since the last session left a higher one selected.
+        let firstStake = definition.betLevels.first?.perLine ?? 10
+        self.selectedStake = firstStake
+        let unlocked = self.availableStakeLevels.map(\.perLine)
+        if !unlocked.isEmpty, !unlocked.contains(firstStake) {
+            self.selectedStake = unlocked.last ?? firstStake
+        }
     }
 
     var maxLevel: Int { levels.count }
@@ -79,6 +88,39 @@ final class RiskLadderSessionController {
     var canStart: Bool { state == .idle }
     var canRisk: Bool { state == .ready }
     var canCashOut: Bool { state == .ready && currentLevel > 0 }
+
+    /// This player's current level/win-chance multiplier - same source and
+    /// same reasoning as `SpinSessionController.progressionInputs`.
+    private var progressionInputs: (level: Int, playerMultiplier: Double) {
+        let profile = wallet.currentProfile()
+        return (Int(profile.level), profile.winChanceMultiplier)
+    }
+
+    /// The win-chance context this player currently has, applied to each
+    /// climb attempt's base probability - see `RiskLadderEngine.attemptClimb`.
+    var probabilityContext: GameProbabilityContext {
+        let inputs = progressionInputs
+        return PlayerProgressionService.probabilityContext(level: inputs.level, playerMultiplier: inputs.playerMultiplier)
+    }
+
+    /// This game's own stakes, filtered down to what the player's current
+    /// level actually unlocks - reuses the exact same global bet-tier logic
+    /// the slot uses, per the task's explicit "no second special-case
+    /// solution" ask.
+    var availableStakeLevels: [BetLevel] {
+        let gameMaximumBet = definition.betLevels.map(\.perLine).max() ?? 0
+        let limit = PlayerProgressionService.effectiveMaxBet(level: progressionInputs.level, gameMaximumBet: gameMaximumBet)
+        return definition.betLevels.filter { $0.perLine <= limit }
+    }
+
+    /// Stakes this game supports but the player's level doesn't unlock yet,
+    /// paired with the level that would unlock each one.
+    var lockedStakeLevels: [(bet: BetLevel, unlockLevel: Int?)] {
+        let unlocked = Set(availableStakeLevels.map(\.perLine))
+        return definition.betLevels
+            .filter { !unlocked.contains($0.perLine) }
+            .map { ($0, PlayerProgressionService.unlockLevel(forBet: $0.perLine)) }
+    }
 
     /// The multiplier for the rung currently stood on (`0` while at START).
     var currentMultiplier: Double {
@@ -91,21 +133,27 @@ final class RiskLadderSessionController {
         RiskLadderEngine.payout(stake: activeStake, level: currentLevel, configuration: levels)
     }
 
-    /// The success probability of the *next* climb, for UI display (e.g.
-    /// hinting how risky the next rung is). `nil` once at the top.
+    /// The *effective* (bonus-adjusted) success probability of the next
+    /// climb, for UI display (e.g. hinting how risky the next rung really
+    /// is for this player) - not the raw configured base value, so the hint
+    /// stays honest once a win-chance bonus is in play. `nil` once at the
+    /// top.
     var nextClimbProbability: Double? {
         guard currentLevel < levels.count else { return nil }
-        return levels[currentLevel].successProbability
+        return probabilityContext.adjustedProbability(base: levels[currentLevel].successProbability)
     }
 
+    /// Only accepts a stake this game supports *and* the player's level has
+    /// unlocked - never just `definition.betLevels` (see
+    /// `availableStakeLevels`).
     func selectStake(_ amount: Int64) {
         guard canSelectStake else { return }
-        guard definition.betLevels.contains(where: { $0.perLine == amount }) else { return }
+        guard availableStakeLevels.contains(where: { $0.perLine == amount }) else { return }
         selectedStake = amount
     }
 
     func selectMaxStake() {
-        guard let maxStake = definition.betLevels.map(\.perLine).max() else { return }
+        guard let maxStake = availableStakeLevels.map(\.perLine).max() else { return }
         selectStake(maxStake)
     }
 
@@ -120,6 +168,17 @@ final class RiskLadderSessionController {
     /// second time (the first call already moved `state` off `.idle`).
     func startRound() {
         guard canStart else { return }
+
+        // Defensive re-check, same reasoning as `SpinSessionController.spin()`:
+        // a background sync could have lowered the player's level (hence
+        // their stake limit) between selecting this stake and pressing
+        // START.
+        guard availableStakeLevels.contains(where: { $0.perLine == selectedStake }) else {
+            let message = "Dieser Einsatz ist mit deinem aktuellen Level nicht mehr freigeschaltet."
+            errorMessage = message
+            state = .error(message: message)
+            return
+        }
 
         guard wallet.canAfford(selectedStake) else {
             let message = "Nicht genug Soul Coins für diesen Einsatz."
@@ -161,7 +220,12 @@ final class RiskLadderSessionController {
     func risk() {
         guard canRisk else { return }
         state = .risking
-        let succeeded = RiskLadderEngine.attemptClimb(fromLevel: currentLevel, configuration: levels, randomSource: &randomSource)
+        let succeeded = RiskLadderEngine.attemptClimb(
+            fromLevel: currentLevel,
+            configuration: levels,
+            probabilityContext: probabilityContext,
+            randomSource: &randomSource
+        )
         Task { [weak self] in
             await self?.playOutcome(succeeded: succeeded)
         }

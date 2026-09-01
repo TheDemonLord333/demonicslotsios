@@ -107,22 +107,52 @@ struct CollectionView: View {
                 profileButton
             }
 
-            HStack(spacing: 10) {
-                Image(systemName: "flame.circle.fill")
-                    .foregroundStyle(DemonicPalette.emberOrange)
-                Text("\(balance) Soul Coins")
-                    .font(.title3.weight(.bold))
-                    .foregroundStyle(DemonicPalette.boneIvory)
-                    .contentTransition(.numericText())
-                    .animation(.default, value: balance)
-                Spacer()
-                toolbarButtons
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(spacing: 10) {
+                    Image(systemName: "flame.circle.fill")
+                        .foregroundStyle(DemonicPalette.emberOrange)
+                    Text("\(balance) Soul Coins")
+                        .font(.title3.weight(.bold))
+                        .foregroundStyle(DemonicPalette.boneIvory)
+                        .contentTransition(.numericText())
+                        .animation(.default, value: balance)
+                    Spacer()
+                    toolbarButtons
+                }
+
+                HStack(spacing: 14) {
+                    Label("Level \(level)", systemImage: "star.fill")
+                    if winBonusPercent != 0 {
+                        Label(winBonusLabel, systemImage: "bolt.fill")
+                    }
+                }
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(DemonicPalette.glowingViolet)
             }
             .padding(14)
             .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
             .accessibilityElement(children: .combine)
-            .accessibilityLabel("Kontostand: \(balance) Soul Coins")
+            .accessibilityLabel("Kontostand: \(balance) Soul Coins, Level \(level), Win-Bonus \(winBonusLabel)")
         }
+    }
+
+    private var level: Int64 { profiles.first?.level ?? 1 }
+
+    /// `PlayerProgressionService.finalWinMultiplier` as a signed percent
+    /// bonus (level bonus × player multiplier combined) - never the two
+    /// percentages added together, since the underlying math is a product
+    /// of multipliers, not a sum (see that service's header comment).
+    private var winBonusPercent: Double {
+        let profile = profiles.first
+        let multiplier = PlayerProgressionService.finalWinMultiplier(
+            level: Int(level),
+            playerMultiplier: profile?.winChanceMultiplier ?? 1.0
+        )
+        return PlayerProgressionService.percentBonus(fromMultiplier: multiplier)
+    }
+
+    private var winBonusLabel: String {
+        String(format: "%@%.1f%% Win-Bonus", winBonusPercent >= 0 ? "+" : "", winBonusPercent)
     }
 
     private var profileButton: some View {

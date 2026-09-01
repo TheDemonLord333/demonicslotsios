@@ -80,7 +80,7 @@ private struct RiskLadderContentView: View {
 
                     if controller.state == .idle {
                         RiskLadderStakeControlView(
-                            stakeLevels: definition.betLevels,
+                            stakeLevels: controller.availableStakeLevels,
                             selectedStake: controller.selectedStake,
                             isEnabled: controller.canSelectStake,
                             onSelect: { stake in
@@ -92,6 +92,9 @@ private struct RiskLadderContentView: View {
                                 hapticsService?.selection()
                             }
                         )
+                        if let nextLocked = controller.lockedStakeLevels.first {
+                            lockedStakeHint(for: nextLocked)
+                        }
                     }
 
                     controlButtons
@@ -163,6 +166,24 @@ private struct RiskLadderContentView: View {
         guard controller.currentLevel > 0 else { return "x0" }
         let value = controller.currentMultiplier
         return value.truncatingRemainder(dividingBy: 1) == 0 ? "x\(Int(value))" : String(format: "x%.1f", value)
+    }
+
+    /// Small "🔒 Level X schaltet Y Coins frei" hint for the next stake the
+    /// player hasn't unlocked yet - keeps the existing stake stepper
+    /// unchanged (it simply never offers a locked stake) while still
+    /// showing the player that higher levels unlock more, per the task's
+    /// "locked bets" ask.
+    private func lockedStakeHint(for locked: (bet: BetLevel, unlockLevel: Int?)) -> some View {
+        HStack(spacing: 6) {
+            Image(systemName: "lock.fill")
+            if let unlockLevel = locked.unlockLevel {
+                Text("Level \(unlockLevel) schaltet \(locked.bet.perLine) Coins Einsatz frei")
+            } else {
+                Text("\(locked.bet.perLine) Coins Einsatz noch nicht freigeschaltet")
+            }
+        }
+        .font(.caption)
+        .foregroundStyle(DemonicPalette.boneIvory.opacity(0.6))
     }
 
     private func infoColumn(title: String, value: String, alignment: HorizontalAlignment, emphasized: Bool = false) -> some View {

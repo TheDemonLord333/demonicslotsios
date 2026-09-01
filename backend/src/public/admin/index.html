@@ -68,6 +68,8 @@
   th, td { text-align: left; padding: 8px 6px; border-bottom: 1px solid var(--border); }
   th { color: var(--muted); font-weight: 600; font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.04em; }
   .balance-input { width: 110px; }
+  .level-input { width: 70px; }
+  .multiplier-input { width: 90px; }
   .status { font-size: 0.82rem; margin-top: 10px; min-height: 1.2em; }
   .status.error { color: var(--danger); }
   .status.ok { color: #7CE28A; }
@@ -94,13 +96,15 @@
         <tr>
           <th>Username</th>
           <th>Guthaben</th>
+          <th>Level</th>
+          <th>Win-Multiplier</th>
           <th>Admin-Revision</th>
           <th>Zuletzt geändert</th>
           <th></th>
         </tr>
       </thead>
       <tbody id="playersBody">
-        <tr><td colspan="5" class="muted">Noch keine Daten geladen.</td></tr>
+        <tr><td colspan="7" class="muted">Noch keine Daten geladen.</td></tr>
       </tbody>
     </table>
   </div>
@@ -145,7 +149,7 @@
 
   function renderPlayers(players) {
     if (!players.length) {
-      playersBody.innerHTML = '<tr><td colspan="5" class="muted">Noch keine Spieler registriert.</td></tr>';
+      playersBody.innerHTML = '<tr><td colspan="7" class="muted">Noch keine Spieler registriert.</td></tr>';
       return;
     }
     playersBody.innerHTML = "";
@@ -164,6 +168,26 @@
       balanceInput.value = player.coinBalance;
       balanceTd.appendChild(balanceInput);
 
+      const levelTd = document.createElement("td");
+      const levelInput = document.createElement("input");
+      levelInput.className = "level-input";
+      levelInput.type = "number";
+      levelInput.min = "1";
+      levelInput.max = "100";
+      levelInput.step = "1";
+      levelInput.value = player.level;
+      levelTd.appendChild(levelInput);
+
+      const multiplierTd = document.createElement("td");
+      const multiplierInput = document.createElement("input");
+      multiplierInput.className = "multiplier-input";
+      multiplierInput.type = "number";
+      multiplierInput.min = "0.1";
+      multiplierInput.max = "2.0";
+      multiplierInput.step = "0.01";
+      multiplierInput.value = player.winChanceMultiplier;
+      multiplierTd.appendChild(multiplierInput);
+
       const revisionTd = document.createElement("td");
       revisionTd.textContent = player.adminRevision;
 
@@ -176,18 +200,53 @@
       const rowStatus = document.createElement("div");
       rowStatus.className = "status";
 
+      // Track the last-known-saved values so Save only sends fields that
+      // actually changed - sending `balance` unconditionally would bump
+      // admin_revision on every save (even a level-only edit), which would
+      // wrongly make the app discard real gameplay balance changes on its
+      // next sync.
+      let knownBalance = player.coinBalance;
+      let knownLevel = player.level;
+      let knownMultiplier = player.winChanceMultiplier;
+
       saveButton.addEventListener("click", async () => {
         const newBalance = Number(balanceInput.value);
+        const newLevel = Number(levelInput.value);
+        const newMultiplier = Number(multiplierInput.value);
         if (!Number.isInteger(newBalance) || newBalance < 0) {
           setStatus(rowStatus, "Ungültiges Guthaben.", true);
           return;
         }
+        if (!Number.isInteger(newLevel) || newLevel < 1 || newLevel > 100) {
+          setStatus(rowStatus, "Ungültiges Level (1-100).", true);
+          return;
+        }
+        if (!Number.isFinite(newMultiplier) || newMultiplier < 0.1 || newMultiplier > 2.0) {
+          setStatus(rowStatus, "Ungültiger Win-Multiplier (0.10-2.00).", true);
+          return;
+        }
+
+        const body = {};
+        if (newBalance !== knownBalance) body.balance = newBalance;
+        if (newLevel !== knownLevel) body.level = newLevel;
+        if (newMultiplier !== knownMultiplier) body.winChanceMultiplier = newMultiplier;
+        if (Object.keys(body).length === 0) {
+          setStatus(rowStatus, "Keine Änderung.", false);
+          return;
+        }
+
         saveButton.disabled = true;
         try {
           const updated = await apiFetch(
-            "/api/admin/players/" + encodeURIComponent(player.username) + "/balance",
-            { method: "PATCH", body: JSON.stringify({ balance: newBalance }) }
+            "/api/admin/players/" + encodeURIComponent(player.username),
+            { method: "PATCH", body: JSON.stringify(body) }
           );
+          knownBalance = updated.coinBalance;
+          knownLevel = updated.level;
+          knownMultiplier = updated.winChanceMultiplier;
+          balanceInput.value = updated.coinBalance;
+          levelInput.value = updated.level;
+          multiplierInput.value = updated.winChanceMultiplier;
           revisionTd.textContent = updated.adminRevision;
           updatedTd.textContent = new Date(updated.updatedAt).toLocaleString("de-DE");
           setStatus(rowStatus, "Gespeichert.", false);
@@ -201,7 +260,7 @@
       actionTd.appendChild(saveButton);
       actionTd.appendChild(rowStatus);
 
-      tr.append(nameTd, balanceTd, revisionTd, updatedTd, actionTd);
+      tr.append(nameTd, balanceTd, levelTd, multiplierTd, revisionTd, updatedTd, actionTd);
       playersBody.appendChild(tr);
     }
   }

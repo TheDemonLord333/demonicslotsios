@@ -50,6 +50,22 @@ struct RiskLadderEngineTests {
         #expect(!RiskLadderEngine.attemptClimb(fromLevel: levels.count, configuration: levels, randomSource: &random))
     }
 
+    @Test func aWinBonusRaisesTheObservedSuccessRate() {
+        let bonusContext = GameProbabilityContext(finalWinMultiplier: 1.10)
+        var random: any RandomNumberSource = SeededRandomSource(seed: 7)
+        let trials = 20_000
+        var successes = 0
+        for _ in 0..<trials {
+            if RiskLadderEngine.attemptClimb(fromLevel: 0, configuration: levels, probabilityContext: bonusContext, randomSource: &random) {
+                successes += 1
+            }
+        }
+        let observedRate = Double(successes) / Double(trials)
+        // Base probability for level 1 is 0.85; x1.10 -> 0.935 (capped well
+        // under 1.0), a clearly measurable shift from the neutral 0.85.
+        #expect(abs(observedRate - 0.935) < 0.02)
+    }
+
     @Test func repeatedSimulationLandsWithinAWideBandOfTheConfiguredProbability() {
         var random: any RandomNumberSource = SeededRandomSource(seed: 42)
         let trials = 20_000

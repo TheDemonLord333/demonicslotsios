@@ -20,13 +20,21 @@ nonisolated enum RiskLadderEngine {
 
     /// Rolls whether climbing from `currentLevel` (0 = still standing at
     /// START, having climbed nothing yet) to the next rung succeeds.
+    /// `probabilityContext` applies the player's level/win-chance bonus to
+    /// the rung's own `successProbability` via the literal
+    /// `effectiveProbability = baseProbability * finalWinMultiplier`
+    /// formula (capped, see `GameProbabilityContext`) - defaults to
+    /// `.neutral` so every existing call site/test keeps behaving exactly
+    /// as before this feature existed.
     static func attemptClimb(
         fromLevel currentLevel: Int,
         configuration: [RiskLevel] = RiskLadderConfiguration.levels,
+        probabilityContext: GameProbabilityContext = .neutral,
         randomSource: inout any RandomNumberSource
     ) -> Bool {
         guard currentLevel >= 0, currentLevel < configuration.count else { return false }
-        let probability = min(max(configuration[currentLevel].successProbability, 0), 1)
+        let baseProbability = min(max(configuration[currentLevel].successProbability, 0), 1)
+        let probability = probabilityContext.adjustedProbability(base: baseProbability)
         let threshold = Int((probability * Double(probabilityResolution)).rounded())
         let roll = randomSource.nextInt(in: 0..<probabilityResolution)
         return roll < threshold

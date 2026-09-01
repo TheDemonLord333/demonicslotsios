@@ -166,6 +166,40 @@ struct RiskLadderSessionControllerTests {
         #expect(controller.currentLevel == 1)
     }
 
+    @Test func availableStakesAreRestrictedToWhatThePlayersLevelUnlocks() {
+        let context = makeContext()
+        let definition = RiskLadderDefinition.definition
+        let controller = RiskLadderSessionController(definition: definition, context: context, levels: shortLevels)
+
+        // Level 1's global max bet is 100 - Demonic Risk Ladder's own
+        // stakes are 10/25/50/100/250/500 (`RiskLadderConfiguration.
+        // stakeLevels`), so only the ones at or below 100 should be
+        // selectable yet.
+        #expect(controller.availableStakeLevels.map(\.perLine) == [10, 25, 50, 100])
+        #expect(controller.lockedStakeLevels.contains { $0.bet.perLine == 250 })
+    }
+
+    @Test func startRoundRefusesALockedStakeEvenIfSomehowSelectedDirectly() {
+        let context = makeContext()
+        let definition = RiskLadderDefinition.definition
+        let controller = RiskLadderSessionController(definition: definition, context: context, levels: shortLevels)
+        let startBalance = controller.wallet.balance
+
+        // Bypass `selectStake`'s own guard entirely (simulating some future
+        // code path that sets the property directly) - `startRound()` must
+        // still catch it with its own independent re-check before any money
+        // moves.
+        controller.selectedStake = 500 // above level 1's 100-coin limit
+        controller.startRound()
+
+        #expect(controller.wallet.balance == startBalance) // nothing was ever debited
+        if case .error = controller.state {
+            // expected
+        } else {
+            Issue.record("Expected startRound() to refuse a locked stake with an error state, got \(controller.state)")
+        }
+    }
+
     @Test func relaunchingMidRoundResumesWithoutRefundingOrReDebitingTheStake() {
         let context = makeContext()
         let definition = RiskLadderDefinition.definition

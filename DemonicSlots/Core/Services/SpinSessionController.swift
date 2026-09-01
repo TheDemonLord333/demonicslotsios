@@ -63,17 +63,66 @@ final class SpinSessionController {
         self.randomSource = randomSource
 
         let firstBetLevel = definition.betLevels.first?.perLine ?? 1
-        self.selectedBetPerLine = progress.lastBetPerLine > 0 ? progress.lastBetPerLine : firstBetLevel
+        let restoredBet = progress.lastBetPerLine > 0 ? progress.lastBetPerLine : firstBetLevel
         self.isInBonusRound = progress.isInBonusRound
         self.remainingFreeSpins = progress.remainingFreeSpins
         self.totalFreeSpinsInRound = progress.totalFreeSpinsGrantedInRound
         self.bonusAccumulatedPayout = progress.bonusAccumulatedPayout
 
         transactionService.recoverPendingSpins(gameID: definition.id, statistics: statistics)
+
+        // Defensive: a previously-selected bet might no longer be unlocked
+        // (the player's level could have been lowered by an admin edit
+        // since the last session) - fall back to the highest bet that's
+        // still available rather than silently letting a locked bet stand.
+        self.selectedBetPerLine = restoredBet
+        let unlocked = self.availableBetLevels.map(\.perLine)
+        if !unlocked.contains(restoredBet) {
+            self.selectedBetPerLine = unlocked.last ?? firstBetLevel
+        }
     }
 
     var canSpin: Bool {
         state == .idle
+    }
+
+    /// This player's current level/win-chance multiplier, straight from the
+    /// shared `PlayerProfile` (validated again here regardless of whether
+    /// `AccountSyncController` already validated it on the way in - see
+    /// `PlayerProgressionService`'s header comment on why that's cheap
+    /// insurance, not redundant).
+    private var progressionInputs: (level: Int, playerMultiplier: Double) {
+        let profile = wallet.currentProfile()
+        return (Int(profile.level), profile.winChanceMultiplier)
+    }
+
+    /// The win-chance context this player currently has for any game,
+    /// computed once per read from `PlayerProgressionService` rather than
+    /// every mechanic loading `PlayerProfile`/the backend itself.
+    var probabilityContext: GameProbabilityContext {
+        let inputs = progressionInputs
+        return PlayerProgressionService.probabilityContext(level: inputs.level, playerMultiplier: inputs.playerMultiplier)
+    }
+
+    /// This game's own bet levels, filtered down to what the player's
+    /// current level actually unlocks - `min(playerLevelMaxBet,
+    /// gameMaximumBet)` applied to `definition.betLevels`. Never mutates
+    /// `definition.betLevels` itself.
+    var availableBetLevels: [BetLevel] {
+        let gameMaximumBet = definition.betLevels.map(\.perLine).max() ?? 0
+        let limit = PlayerProgressionService.effectiveMaxBet(level: progressionInputs.level, gameMaximumBet: gameMaximumBet)
+        return definition.betLevels.filter { $0.perLine <= limit }
+    }
+
+    /// Bet levels this game supports but the player's level doesn't unlock
+    /// yet, paired with the level that *would* unlock each one - for a
+    /// "🔒 Level X" hint in the bet control. `nil` for a bet no configured
+    /// tier ever unlocks.
+    var lockedBetLevels: [(bet: BetLevel, unlockLevel: Int?)] {
+        let unlocked = Set(availableBetLevels.map(\.perLine))
+        return definition.betLevels
+            .filter { !unlocked.contains($0.perLine) }
+            .map { ($0, PlayerProgressionService.unlockLevel(forBet: $0.perLine)) }
     }
 
     /// The largest single-round payout ever recorded for this game,
@@ -87,16 +136,20 @@ final class SpinSessionController {
         definition.totalBet(betPerLine: selectedBetPerLine)
     }
 
+    /// Only accepts a bet this game supports *and* the player's level has
+    /// unlocked (see `availableBetLevels`) - never just `definition.
+    /// betLevels`, so a locked bet can't be selected by calling this
+    /// directly even if a view somehow offered it.
     func selectBet(perLine: Int64) {
         guard canSpin, !isInBonusRound else { return }
-        guard definition.betLevels.contains(where: { $0.perLine == perLine }) else { return }
+        guard availableBetLevels.contains(where: { $0.perLine == perLine }) else { return }
         selectedBetPerLine = perLine
         progress.lastBetPerLine = perLine
         try? context.save()
     }
 
     func selectMaxBet() {
-        guard let maxLevel = definition.betLevels.map(\.perLine).max() else { return }
+        guard let maxLevel = availableBetLevels.map(\.perLine).max() else { return }
         selectBet(perLine: maxLevel)
     }
 
@@ -120,11 +173,26 @@ final class SpinSessionController {
 
     func spin() {
         guard canSpin else { return }
-        state = .preparing
-        errorMessage = nil
 
         let isFreeSpin = progress.isInBonusRound
         let betPerLine = isFreeSpin ? progress.bonusTriggerBetPerLine : selectedBetPerLine
+
+        // Defensive re-check, not just the picker's own guard: a background
+        // sync could have lowered the player's level (hence their bet
+        // limit) between selecting this bet and pressing spin. A regular
+        // stake spin with a now-locked bet is refused outright rather than
+        // silently spun at a different amount than the player chose; a free
+        // spin's stake was already fixed when its bonus round started and
+        // is never re-validated against the *current* limit.
+        if !isFreeSpin, !availableBetLevels.contains(where: { $0.perLine == betPerLine }) {
+            errorMessage = "Dieser Einsatz ist mit deinem aktuellen Level nicht mehr freigeschaltet."
+            state = .error(message: errorMessage!)
+            return
+        }
+
+        state = .preparing
+        errorMessage = nil
+
         let freeSpinMultiplier = definition.freeSpinsRules?.winMultiplier ?? 1
 
         let result = transactionService.prepareSpin(
@@ -132,6 +200,7 @@ final class SpinSessionController {
             betPerLine: betPerLine,
             isFreeSpin: isFreeSpin,
             freeSpinMultiplier: freeSpinMultiplier,
+            probabilityContext: probabilityContext,
             randomSource: &randomSource
         )
 

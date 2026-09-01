@@ -15,15 +15,15 @@ import Foundation
 // keeps these plain outcome values callable from any isolation context
 // without relying on nested-type isolation inference.
 nonisolated enum RegisterOutcome: Equatable, Sendable {
-    case success(username: String, deviceToken: String, coinBalance: Int64, adminRevision: Int64)
+    case success(username: String, deviceToken: String, coinBalance: Int64, adminRevision: Int64, level: Int64, winChanceMultiplier: Double)
     case usernameTaken
     case invalidUsername
     case networkError(String)
 }
 
 nonisolated enum SyncOutcome: Equatable, Sendable {
-    case serverWins(coinBalance: Int64, adminRevision: Int64)
-    case clientApplied(adminRevision: Int64)
+    case serverWins(coinBalance: Int64, adminRevision: Int64, level: Int64, winChanceMultiplier: Double)
+    case clientApplied(adminRevision: Int64, level: Int64, winChanceMultiplier: Double)
     case notRegistered
     case invalidDeviceToken
     case networkError(String)
@@ -58,11 +58,20 @@ nonisolated struct BackendSyncService: Sendable {
                     let returnedUsername = json["username"] as? String,
                     let deviceToken = json["deviceToken"] as? String,
                     let coinBalance = int64Value(json["coinBalance"]),
-                    let adminRevision = int64Value(json["adminRevision"])
+                    let adminRevision = int64Value(json["adminRevision"]),
+                    let level = int64Value(json["level"]),
+                    let winChanceMultiplier = doubleValue(json["winChanceMultiplier"])
                 else {
                     return .networkError("Unerwartete Serverantwort.")
                 }
-                return .success(username: returnedUsername, deviceToken: deviceToken, coinBalance: coinBalance, adminRevision: adminRevision)
+                return .success(
+                    username: returnedUsername,
+                    deviceToken: deviceToken,
+                    coinBalance: coinBalance,
+                    adminRevision: adminRevision,
+                    level: level,
+                    winChanceMultiplier: winChanceMultiplier
+                )
             case 409:
                 return .usernameTaken
             case 400:
@@ -104,14 +113,16 @@ nonisolated struct BackendSyncService: Sendable {
                     let json = decodeJSONObject(data),
                     let resolution = json["resolution"] as? String,
                     let coinBalance = int64Value(json["coinBalance"]),
-                    let adminRevision = int64Value(json["adminRevision"])
+                    let adminRevision = int64Value(json["adminRevision"]),
+                    let level = int64Value(json["level"]),
+                    let winChanceMultiplier = doubleValue(json["winChanceMultiplier"])
                 else {
                     return .networkError("Unerwartete Serverantwort.")
                 }
                 if resolution == "server_wins" {
-                    return .serverWins(coinBalance: coinBalance, adminRevision: adminRevision)
+                    return .serverWins(coinBalance: coinBalance, adminRevision: adminRevision, level: level, winChanceMultiplier: winChanceMultiplier)
                 }
-                return .clientApplied(adminRevision: adminRevision)
+                return .clientApplied(adminRevision: adminRevision, level: level, winChanceMultiplier: winChanceMultiplier)
             case 403:
                 return .invalidDeviceToken
             case 404:
@@ -145,6 +156,11 @@ nonisolated struct BackendSyncService: Sendable {
 
     private func int64Value(_ value: Any?) -> Int64? {
         if let number = value as? NSNumber { return number.int64Value }
+        return nil
+    }
+
+    private func doubleValue(_ value: Any?) -> Double? {
+        if let number = value as? NSNumber { return number.doubleValue }
         return nil
     }
 }

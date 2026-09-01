@@ -52,6 +52,10 @@ expect_status "register new username" 201 "$STATUS"
 DEVICE_TOKEN=$(json_field deviceToken < /tmp/smoke_resp.json)
 [ -n "$DEVICE_TOKEN" ] && pass "device token issued" || fail "device token issued"
 
+echo "== new player defaults to level 1, winChanceMultiplier 1.0 =="
+expect_field "default level is 1" "1" "$(json_field level < /tmp/smoke_resp.json)"
+expect_field "default winChanceMultiplier is 1.0" "1" "$(json_field winChanceMultiplier < /tmp/smoke_resp.json)"
+
 echo "== duplicate username (different casing) is rejected =="
 STATUS=$(curl -s -o /tmp/smoke_resp.json -w "%{http_code}" -X POST "$BASE_URL/api/players/register" \
   -H "Content-Type: application/json" -d "{\"username\":\"${USERNAME,,}\",\"initialBalance\":100}")
@@ -65,12 +69,39 @@ expect_status "sync request" 200 "$STATUS"
 expect_field "resolution is client_applied" "client_applied" "$(json_field resolution < /tmp/smoke_resp.json)"
 expect_field "balance reflects local play" "4200" "$(json_field coinBalance < /tmp/smoke_resp.json)"
 
-echo "== admin override always wins, ignoring a stale local balance =="
-curl -s -o /dev/null -X PATCH "$BASE_URL/api/admin/players/$USERNAME/balance" \
+echo "== admin can set level and winChanceMultiplier without touching admin_revision =="
+REVISION_BEFORE=$(json_field adminRevision < /tmp/smoke_resp.json)
+STATUS=$(curl -s -o /tmp/smoke_resp.json -w "%{http_code}" -X PATCH "$BASE_URL/api/admin/players/$USERNAME" \
+  -H "Authorization: Bearer $ADMIN_TOKEN" -H "Content-Type: application/json" \
+  -d '{"level":12,"winChanceMultiplier":1.08}')
+expect_status "admin level/multiplier update" 200 "$STATUS"
+expect_field "level updated" "12" "$(json_field level < /tmp/smoke_resp.json)"
+expect_field "winChanceMultiplier updated" "1.08" "$(json_field winChanceMultiplier < /tmp/smoke_resp.json)"
+expect_field "admin_revision unchanged by a level/multiplier-only edit" "$REVISION_BEFORE" "$(json_field adminRevision < /tmp/smoke_resp.json)"
+
+echo "== the next sync reflects the admin-set level/multiplier without a server_wins conflict =="
+STATUS=$(curl -s -o /tmp/smoke_resp.json -w "%{http_code}" -X POST "$BASE_URL/api/players/sync" \
+  -H "Content-Type: application/json" \
+  -d "{\"username\":\"$USERNAME\",\"deviceToken\":\"$DEVICE_TOKEN\",\"localBalance\":4200,\"lastKnownAdminRevision\":$REVISION_BEFORE}")
+expect_status "sync after level/multiplier edit" 200 "$STATUS"
+expect_field "resolution is still client_applied" "client_applied" "$(json_field resolution < /tmp/smoke_resp.json)"
+expect_field "sync carries the new level" "12" "$(json_field level < /tmp/smoke_resp.json)"
+expect_field "sync carries the new winChanceMultiplier" "1.08" "$(json_field winChanceMultiplier < /tmp/smoke_resp.json)"
+
+echo "== invalid level/winChanceMultiplier are rejected, not silently clamped =="
+STATUS=$(curl -s -o /dev/null -w "%{http_code}" -X PATCH "$BASE_URL/api/admin/players/$USERNAME" \
+  -H "Authorization: Bearer $ADMIN_TOKEN" -H "Content-Type: application/json" -d '{"level":-500}')
+expect_status "negative level rejected" 400 "$STATUS"
+STATUS=$(curl -s -o /dev/null -w "%{http_code}" -X PATCH "$BASE_URL/api/admin/players/$USERNAME" \
+  -H "Authorization: Bearer $ADMIN_TOKEN" -H "Content-Type: application/json" -d '{"winChanceMultiplier":99999}')
+expect_status "absurd multiplier rejected" 400 "$STATUS"
+
+echo "== admin override of balance always wins, ignoring a stale local balance =="
+curl -s -o /dev/null -X PATCH "$BASE_URL/api/admin/players/$USERNAME" \
   -H "Authorization: Bearer $ADMIN_TOKEN" -H "Content-Type: application/json" -d '{"balance":99999}'
 STATUS=$(curl -s -o /tmp/smoke_resp.json -w "%{http_code}" -X POST "$BASE_URL/api/players/sync" \
   -H "Content-Type: application/json" \
-  -d "{\"username\":\"$USERNAME\",\"deviceToken\":\"$DEVICE_TOKEN\",\"localBalance\":1,\"lastKnownAdminRevision\":0}")
+  -d "{\"username\":\"$USERNAME\",\"deviceToken\":\"$DEVICE_TOKEN\",\"localBalance\":1,\"lastKnownAdminRevision\":$REVISION_BEFORE}")
 expect_status "sync after admin edit" 200 "$STATUS"
 expect_field "resolution is server_wins" "server_wins" "$(json_field resolution < /tmp/smoke_resp.json)"
 expect_field "server balance overrides local" "99999" "$(json_field coinBalance < /tmp/smoke_resp.json)"

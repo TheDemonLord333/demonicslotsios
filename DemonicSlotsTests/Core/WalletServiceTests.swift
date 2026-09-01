@@ -21,6 +21,13 @@ struct WalletServiceTests {
         #expect(wallet.balance == 5_000)
     }
 
+    @Test func newPlayerDefaultsToLevelOneAndNeutralWinChanceMultiplier() {
+        let wallet = WalletService(context: makeContext())
+        let profile = wallet.currentProfile()
+        #expect(profile.level == 1)
+        #expect(profile.winChanceMultiplier == 1.0)
+    }
+
     @Test func debitSucceedsAndReducesBalanceExactly() {
         let wallet = WalletService(context: makeContext())
         let start = wallet.balance

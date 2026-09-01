@@ -47,6 +47,7 @@ final class SpinTransactionService {
         betPerLine: Int64,
         isFreeSpin: Bool,
         freeSpinMultiplier: Int64,
+        probabilityContext: GameProbabilityContext = .neutral,
         randomSource: inout any RandomNumberSource
     ) -> PrepareResult {
         let totalBet = definition.totalBet(betPerLine: betPerLine)
@@ -62,6 +63,7 @@ final class SpinTransactionService {
                 betPerLine: betPerLine,
                 isFreeSpin: isFreeSpin,
                 freeSpinMultiplier: freeSpinMultiplier,
+                probabilityContext: probabilityContext,
                 randomSource: &randomSource
             )
         } catch {

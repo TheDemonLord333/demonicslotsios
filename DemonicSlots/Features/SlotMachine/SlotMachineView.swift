@@ -90,7 +90,7 @@ private struct SlotMachineContentView: View {
                 infoRow
 
                 BetControlView(
-                    betLevels: definition.betLevels,
+                    betLevels: controller.availableBetLevels,
                     selectedBetPerLine: controller.selectedBetPerLine,
                     lineCount: definition.activeLineCount,
                     isEnabled: controller.canSpin && !controller.isInBonusRound,
@@ -103,6 +103,9 @@ private struct SlotMachineContentView: View {
                         hapticsService?.selection()
                     }
                 )
+                if let nextLocked = controller.lockedBetLevels.first {
+                    lockedBetHint(for: nextLocked)
+                }
 
                 spinButton
                 footerButtons
@@ -233,6 +236,23 @@ private struct SlotMachineContentView: View {
         } else {
             label.frame(maxWidth: .infinity, alignment: frameAlignment)
         }
+    }
+
+    /// Small "🔒 Level X schaltet Y Coins frei" hint for the next bet the
+    /// player hasn't unlocked yet - keeps `BetControlView` itself unchanged
+    /// (it simply never offers a locked bet) while still showing the player
+    /// that higher levels unlock more, per the task's "locked bets" ask.
+    private func lockedBetHint(for locked: (bet: BetLevel, unlockLevel: Int?)) -> some View {
+        HStack(spacing: 6) {
+            Image(systemName: "lock.fill")
+            if let unlockLevel = locked.unlockLevel {
+                Text("Level \(unlockLevel) schaltet \(locked.bet.perLine) Coins Einsatz frei")
+            } else {
+                Text("\(locked.bet.perLine) Coins Einsatz noch nicht freigeschaltet")
+            }
+        }
+        .font(.caption)
+        .foregroundStyle(DemonicPalette.boneIvory.opacity(0.6))
     }
 
     private var freeSpinsBadge: some View {

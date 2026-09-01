@@ -52,6 +52,56 @@ struct SpinSessionControllerTests {
         #expect(controller.wallet.balance == expectedBalance)
     }
 
+    @Test func betSelectionIsRestrictedToWhatThePlayersLevelUnlocks() {
+        let context = makeContext()
+        let definition = InfernalForgeDefinition.definition
+        let controller = SpinSessionController(definition: definition, plugin: nil, context: context)
+
+        // Level 1 (the default) unlocks bets up to 100 - Infernal Forge's
+        // own bet levels are 1/2/5/10/25, all well under that, so every one
+        // of them should already be available and normal play is
+        // unaffected by this feature.
+        #expect(controller.availableBetLevels.map(\.perLine) == definition.betLevels.map(\.perLine))
+        #expect(controller.lockedBetLevels.isEmpty)
+    }
+
+    @Test func aPlayerCannotSelectOrSpinABetAboveTheirCurrentLevelLimit() {
+        let context = makeContext()
+        let definition = TestSupport.makeMockDefinition() // bet levels: [1]... extend below
+        var widerDefinition = definition
+        widerDefinition.betLevels = [BetLevel(perLine: 1), BetLevel(perLine: 1_000)]
+        let controller = SpinSessionController(definition: widerDefinition, plugin: nil, context: context)
+
+        // Level 1's global max bet is 100, so this game's own 1,000-coin
+        // bet level is not actually selectable yet.
+        #expect(!controller.availableBetLevels.contains { $0.perLine == 1_000 })
+        controller.selectBet(perLine: 1_000)
+        #expect(controller.selectedBetPerLine != 1_000)
+        #expect(controller.lockedBetLevels.contains { $0.bet.perLine == 1_000 })
+    }
+
+    @Test func spinRefusesALockedBetEvenIfSomehowSelectedDirectly() {
+        let context = makeContext()
+        let definition = TestSupport.makeMockDefinition()
+        var widerDefinition = definition
+        widerDefinition.betLevels = [BetLevel(perLine: 1), BetLevel(perLine: 1_000)]
+        let controller = SpinSessionController(definition: widerDefinition, plugin: nil, context: context)
+        let startBalance = controller.wallet.balance
+
+        // Bypass `selectBet`'s own guard entirely (simulating some future
+        // code path that sets the property directly) - `spin()` must still
+        // catch it with its own independent re-check before any money moves.
+        controller.selectedBetPerLine = 1_000
+        controller.spin()
+
+        #expect(controller.wallet.balance == startBalance) // nothing was ever debited
+        if case .error = controller.state {
+            // expected
+        } else {
+            Issue.record("Expected spin() to refuse a locked bet with an error state, got \(controller.state)")
+        }
+    }
+
     @Test func betCanOnlyBeChangedWhileIdle() {
         let context = makeContext()
         let definition = InfernalForgeDefinition.definition

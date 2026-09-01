@@ -157,6 +157,88 @@ ist die Startkonfiguration ein Ausgangswert, kein gemessenes Ergebnis;
 `SeededRandomSource`, hoher Stichprobenzahl) dass die beobachtete
 Erfolgsquote einer Stufe ungefähr der konfigurierten entspricht.
 
+## Player-Level, Win-Chance-Multiplikator & Bet-Tiers
+
+Jeder Spieler hat zusätzlich zu Coins ein serverseitig verwaltetes `level`
+(1-100) und einen `winChanceMultiplier` (0.10-2.00) - siehe
+`backend/README.md`s "Player progression"-Abschnitt für die Backend-Seite
+(Schema, Migration, API, serverseitige Validierung). Diese zwei Werte
+beeinflussen zwei unabhängige Dinge, nie über verstreute
+`if player.level >= X`-Ketten, sondern ausschließlich über eine zentrale
+Stelle:
+
+```
+PlayerProfile (level, winChanceMultiplier - vom Server synchronisiert)
+  ↓
+PlayerProgressionService  (Core/Services/PlayerProgressionService.swift)
+  ↓
+GameProbabilityContext    (Core/Models/GameProbabilityContext.swift)
+  ↓
+SlotEngine / RiskLadderEngine
+```
+
+- **Gewinnchance:** `finalWinMultiplier = levelWinMultiplier(level) *
+  validatedWinChanceMultiplier`, angewendet als `effectiveProbability =
+  baseProbability * finalWinMultiplier`, gedeckelt bei
+  `PlayerProgressionService.maximumEffectiveWinChance` (Default `0.95`) -
+  ein hoher Multiplikator kann also nie einen praktisch garantierten Gewinn
+  erzeugen. Beispiel aus der Aufgabenstellung: Level-Bonus `1.08` ×
+  Admin-Multiplikator `1.10` = `1.188`; eine Basis-Gewinnchance von `20 %`
+  wird damit zu `23.76 %`, nicht zu `20 % + 18.8 % = 38.8 %`.
+  - **Demonic Risk Ladder** wendet diese Formel wörtlich auf die
+    konfigurierte `successProbability` jeder Stufe an
+    (`RiskLadderEngine.attemptClimb`).
+  - **Infernal Forge** hat keine einzelne skalare "Gewinnwahrscheinlichkeit"
+    - ein Spin-Ergebnis entsteht kombinatorisch daraus, welche Symbole auf
+      allen Walzen landen. Die ehrliche, "innerhalb der bestehenden
+      RNG-/Walzen-Logik" liegende Umsetzung ist deshalb eine
+      **Gewichtsverschiebung bei der Stop-Index-Auswahl** in `ReelSpinner`:
+      jedes Symbol bekommt anhand seines eigenen Paytable-Werts (bzw. für
+      das Scatter-Symbol seines Freispiel-Payouts) ein Auswahlgewicht,
+      normiert auf das wertvollste Symbol des jeweiligen Spiels - ein Bonus
+      erhöht das Gewicht wertvoller Symbole (und senkt es für weniger
+      wertvolle), ohne Paylines/Payout-Mathematik anzufassen oder je ein
+      Ergebnis zu erzeugen, das der Walzenstreifen nicht ohnehin hergeben
+      könnte. Bei `finalWinMultiplier == 1.0` (kein Bonus, der
+      Normalfall) läuft exakt der ursprüngliche, uniforme
+      `nextInt(0..<strip.count)`-Wurf - byte-identisches Verhalten zu vorher,
+      siehe `ReelSpinner.swift`s Kopfkommentar und
+      `ReelSpinnerTests.neutralProbabilityContextIsByteForByteIdenticalToTheOriginalRoll`.
+- **Einsatzlimits:** `PlayerLevelConfiguration.betTiers` (sparsame
+  Meilensteine, z. B. Level 10 → 500, unverändert bis Level 15 → 1.000) legt
+  das **globale** Max-Bet fest; `effectiveMaxBet = min(globalesMaxBet,
+  spielEigenesMaxBet)`. Jedes Spiel filtert seine eigene `betLevels`-Liste
+  über `PlayerProgressionService.availableBets(...)` auf das, was das
+  aktuelle Level tatsächlich freischaltet (`SpinSessionController.
+  availableBetLevels`, `RiskLadderSessionController.availableStakeLevels`) -
+  ein gesperrter Einsatz lässt sich weder in der UI auswählen noch (als
+  zweite, unabhängige Absicherung) tatsächlich starten
+  (`spin()`/`startRound()` prüfen das erneut). Der nächste gesperrte Einsatz
+  wird als kleiner "🔒 Level X schaltet Y Coins frei"-Hinweis unterhalb der
+  bestehenden Einsatzsteuerung angezeigt, ohne deren UI umzubauen.
+- **Level-Konfiguration** (`PlayerLevelConfiguration.swift`): zwei bewusst
+  getrennte, leicht erweiterbare Tabellen - `levels` (Win-Bonus pro Level,
+  dicht bis Level 10, danach bleibt der letzte Wert stehen) und `betTiers`
+  (Meilensteine für das Max-Bet). Neue Stufen/Tiers hinzufügen heißt nur,
+  diese Arrays zu erweitern.
+- **Validierung, zweifach:** Level (`1...100`) und Multiplikator
+  (`0.10...2.00`, `NaN`/`Infinity` → Fallback `1.0`) werden sowohl vom
+  Backend (`routes/admin.js`, lehnt ungültige Werte mit `400` ab) als auch
+  clientseitig erneut geprüft (`PlayerProgressionService.validatedLevel`/
+  `validatedWinChanceMultiplier`, `AccountSyncController` wendet das direkt
+  beim Einlesen einer Sync-Antwort an) - ein korrupter oder manipulierter
+  Wert kann das Spiel nie zum Absturz bringen oder eine kaputte
+  Wahrscheinlichkeit erzeugen.
+- **Server bleibt Quelle der Wahrheit:** `level`/`winChanceMultiplier`
+  werden ausschließlich von `AccountSyncController` aus einer
+  Register-/Sync-Antwort geschrieben, nie von Gameplay-Code - eine
+  zukünftige Admin-App ändert sie über `PATCH /api/admin/players/:username`
+  (siehe `backend/README.md`), die App übernimmt den neuen Wert beim
+  nächsten Sync automatisch, ganz ohne Sonderweg für diese beiden Felder.
+- **Level ≠ Coins:** Level wird ausschließlich als gespeicherter
+  Profilwert behandelt, niemals aus dem Coin-Guthaben berechnet - ein Spieler
+  mit vielen Coins ist nicht automatisch hochstufig.
+
 ## Wichtige Spielregeln (Kurzreferenz)
 
 - Guthaben/Einsätze/Gewinne ausschließlich `Int64`, niemals negativ, niemals
