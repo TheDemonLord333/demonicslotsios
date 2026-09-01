@@ -26,6 +26,7 @@ final class GameRegistry {
     init(registerBuiltIns: Bool = true) {
         guard registerBuiltIns else { return }
         register(definition: InfernalForgeDefinition.definition)
+        register(definition: RiskLadderDefinition.definition)
         for placeholder in ComingSoonGames.placeholders {
             register(definition: placeholder)
         }

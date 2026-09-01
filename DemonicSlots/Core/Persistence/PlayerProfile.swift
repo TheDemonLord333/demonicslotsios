@@ -44,6 +44,23 @@ final class PlayerProfile {
     var lastKnownAdminRevision: Int64 = 0
     var lastSyncedAt: Date?
 
+    /// Server-authoritative player progression (see
+    /// `PlayerProgressionService`/`AccountSyncController`): the level and
+    /// win-chance multiplier the backend has for this player. Neither is
+    /// ever written by gameplay code - only a successful register/sync sets
+    /// them, always through `PlayerProgressionService`'s validation first,
+    /// so a corrupted or out-of-range backend value never lands here
+    /// unclamped. A player who never registers an online profile simply
+    /// keeps the defaults below forever (`level = 1`, `winChanceMultiplier
+    /// = 1.0`, i.e. no bonus) - coins/level/multiplier are independent
+    /// values, level is never derived from the coin balance.
+    // `= 1`/`= 1.0` here (not just in `init` below) matter for the same
+    // reason `lastKnownAdminRevision`'s does: SwiftData needs a
+    // property-level default to add a new non-optional column to a store
+    // created before this field existed.
+    var level: Int64 = 1
+    var winChanceMultiplier: Double = 1.0
+
     // `profileID` defaults to the literal, not `PlayerProfile.singletonID`:
     // default parameter expressions are evaluated in a nonisolated context
     // and can't reference a MainActor-isolated static property. Must stay
@@ -57,7 +74,9 @@ final class PlayerProfile {
         onlineUsername: String? = nil,
         deviceToken: String? = nil,
         lastKnownAdminRevision: Int64 = 0,
-        lastSyncedAt: Date? = nil
+        lastSyncedAt: Date? = nil,
+        level: Int64 = 1,
+        winChanceMultiplier: Double = 1.0
     ) {
         self.profileID = profileID
         self.soulCoinBalance = soulCoinBalance
@@ -68,6 +87,8 @@ final class PlayerProfile {
         self.deviceToken = deviceToken
         self.lastKnownAdminRevision = lastKnownAdminRevision
         self.lastSyncedAt = lastSyncedAt
+        self.level = level
+        self.winChanceMultiplier = winChanceMultiplier
     }
 
     static let singletonID = "player.singleton"

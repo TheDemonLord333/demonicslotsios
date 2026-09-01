@@ -29,6 +29,13 @@ function serializePlayer(player) {
     username: player.display_name,
     coinBalance: player.coin_balance,
     adminRevision: player.admin_revision,
+    // Server-authoritative player progression: the app only ever reads
+    // these (register/sync), it never writes them - only the admin API
+    // (see routes/admin.js) can change them. Always sent so a syncing
+    // device stays current even when nothing about the coin balance
+    // changed (no admin_revision bump needed for a level/multiplier edit).
+    level: player.level,
+    winChanceMultiplier: player.win_chance_multiplier,
     updatedAt: player.updated_at,
   };
 }
@@ -101,10 +108,11 @@ router.post("/sync", (req, res) => {
   if (!player) {
     // The username this device last knew about doesn't resolve anymore -
     // most likely an admin renamed this player since the last sync (see
-    // routes/admin.js's PATCH .../username, which never changes
-    // device_token). Fall back to looking the player up by their device
-    // token so a rename doesn't lock the app out of syncing; the response
-    // below already reports the player's current (new) username.
+    // routes/admin.js's PATCH .../:id, which never changes device_token
+    // even when the request includes a new username). Fall back to
+    // looking the player up by their device token so a rename doesn't lock
+    // the app out of syncing; the response below already reports the
+    // player's current (new) username.
     player = findByDeviceToken(deviceToken);
   }
   if (!player) {

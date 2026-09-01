@@ -17,7 +17,7 @@ struct InfoView: View {
 
                     infoSection(
                         title: "Über Demonic Slots",
-                        text: "Eine Sammlung dämonisch-thematischer Slot-Spiele. Alle Einsätze und Gewinne bestehen ausschließlich aus virtuellen Soul Coins ohne realen Geldwert."
+                        text: "Eine Sammlung dämonisch-thematischer Casino-Spiele, darunter der Slot Infernal Forge und die Risikoleiter Demonic Risk Ladder. Alle Einsätze und Gewinne bestehen ausschließlich aus virtuellen Soul Coins ohne realen Geldwert."
                     )
                     infoSection(
                         title: "Datenschutz",

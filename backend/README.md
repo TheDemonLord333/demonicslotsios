@@ -13,6 +13,35 @@ required to play.
 - No third-party accounts, no payment processing - usernames and integer
   coin balances only
 
+## Player progression: level & win-chance multiplier
+
+Every player row also carries a `level` (integer, 1-100) and a
+`win_chance_multiplier` (real, 0.10-2.00), used by the app's
+`PlayerProgressionService` to size bet limits and nudge win probability -
+see the iOS README's "Player progression" section for how they're actually
+used in-game. As far as this backend is concerned, both are just two more
+server-authoritative fields on a player:
+
+- **Read-only from the app's side.** `register`/`sync` return them, but the
+  app never sends a `level`/`winChanceMultiplier` value *to* the server -
+  there's no gameplay path that changes them, only an admin edit does.
+  That's why setting one never touches `admin_revision`: that counter
+  exists purely to arbitrate a *coin balance* conflict between "what the
+  device played locally" and "what an admin set directly", and a
+  level/multiplier edit isn't a competing write in the first place - the
+  device just picks up the new value on its very next sync.
+- **Defaults for every existing player**: `level = 1`,
+  `win_chance_multiplier = 1.0`, added by an automatic, idempotent
+  migration in `db.js` (`ALTER TABLE ... ADD COLUMN ... DEFAULT ...`,
+  guarded by `PRAGMA table_info` so it only runs once) - no existing
+  `username`/`coin_balance`/`admin_revision`/timestamps are touched.
+- **Validated server-side**, not just trusted from a future admin app:
+  `level` must be an integer in `1...100`, `win_chance_multiplier` a finite
+  number in `0.10...2.00` - anything else (including `NaN`/`Infinity`,
+  which fail `Number.isFinite`) is rejected with `400`, never silently
+  clamped or stored. See `routes/admin.js`'s `isValidLevel`/
+  `isValidWinChanceMultiplier`.
+
 ## How the sync/conflict logic works
 
 Every player row has an `admin_revision` counter that is **only**
@@ -55,12 +84,11 @@ All request/response bodies are JSON.
 | Method & path | Auth | Purpose |
 |---|---|---|
 | `GET /api/health` | none | Liveness check |
-| `POST /api/players/register` | none | Claim a username. Body: `{ "username": "TheDemonLord333", "initialBalance": 5000 }`. `409 username_taken` if already claimed (case-insensitive). Returns `{ username, coinBalance, adminRevision, deviceToken }` - **the app must store `deviceToken` locally**, it's the secret that authenticates every future sync call for this username (there is no password). |
-| `POST /api/players/sync` | device token in body | Body: `{ "username", "deviceToken", "localBalance", "lastKnownAdminRevision" }`. Returns `{ resolution: "server_wins" \| "client_applied", username, coinBalance, adminRevision, updatedAt }` per the conflict rule above. `403 invalid_device_token` if the token doesn't match that username. If `username` doesn't resolve to any player, falls back to a device-token lookup before giving up (`404 not_found`) - covers a device syncing under a username an admin has since renamed via the endpoint below. |
-| `GET /api/admin/players` | `Authorization: Bearer <ADMIN_TOKEN>` | List every registered player. Each entry now includes a stable `id` - use it, not `username`, to address a specific player in the endpoints below. |
+| `POST /api/players/register` | none | Claim a username. Body: `{ "username": "TheDemonLord333", "initialBalance": 5000 }`. `409 username_taken` if already claimed (case-insensitive). Returns `{ username, coinBalance, adminRevision, level, winChanceMultiplier, deviceToken }` - **the app must store `deviceToken` locally**, it's the secret that authenticates every future sync call for this username (there is no password). New players start at `level: 1`, `winChanceMultiplier: 1.0`. |
+| `POST /api/players/sync` | device token in body | Body: `{ "username", "deviceToken", "localBalance", "lastKnownAdminRevision" }`. Returns `{ resolution: "server_wins" \| "client_applied", username, coinBalance, adminRevision, level, winChanceMultiplier, updatedAt }` per the conflict rule above. `level`/`winChanceMultiplier` are always the current server values regardless of `resolution` - they're never part of the coin-balance conflict. `403 invalid_device_token` if the token doesn't match that username. If `username` doesn't resolve to any player, falls back to a device-token lookup before giving up (`404 not_found`) - covers a device syncing under a username an admin has since renamed via the endpoint below. |
+| `GET /api/admin/players` | `Authorization: Bearer <ADMIN_TOKEN>` | List every registered player. Each entry carries a stable `id` - use it, not `username`, to address a specific player in the endpoint below - plus `level`/`winChanceMultiplier`. |
 | `GET /api/admin/players/:id` | same | One player's current state, looked up by their stable `id`. |
-| `PATCH /api/admin/players/:id/balance` | same | Body: `{ "balance": 12345 }`. Sets the balance **and increments `admin_revision`** - this is the call your "weitere App" makes. |
-| `PATCH /api/admin/players/:id/username` | same | Body: `{ "username": "NewName" }` (same 3-20 char, letters/digits/underscore format as registration). Renames the player - `404 not_found` if `:id` doesn't exist, `409 username_taken` if the new name is already claimed by a *different* player (case-insensitive), `400 invalid_username` for a bad format. Does **not** touch `coin_balance`/`admin_revision`, and `device_token` is untouched too, so the player's device keeps syncing under the hood (see the `/sync` fallback above) - only that device's locally *displayed* name may lag until it next reads a fresh username back from a sync response. |
+| `PATCH /api/admin/players/:id` | same | Body: any non-empty subset of `{ "username": "NewName", "balance": 12345, "level": 20, "winChanceMultiplier": 1.15 }` - send only the field(s) you're changing, addressed by the player's stable `id` (a rename never has to touch or re-find anything else, unlike keying off the mutable username). Setting `balance` **increments `admin_revision`**; setting `username`/`level`/`winChanceMultiplier` does not (see "Player progression" above for why). `404 not_found` if `:id` doesn't exist, `409 username_taken` if the new username is already claimed by a *different* player (case-insensitive), `400 invalid_username`/`invalid_level`/`invalid_win_chance_multiplier`/`invalid_balance` for an out-of-range value, `400 no_fields_to_update` for an empty body. This is the one call your admin app needs for all four fields. |
 
 `id` is a stable identifier assigned once at registration and never
 changes - it's the actual primary key now (`username` is just a mutable
@@ -71,10 +99,10 @@ the app doesn't need to know about `id` for anything it currently does.
 
 A minimal built-in admin page is served at `/admin` (e.g.
 `https://demonicslots.thedemonlord333.me/admin`) - paste your `ADMIN_TOKEN`
-in, list players, edit balances. It's there so you have something usable
-immediately; swap it for (or add to it) a dedicated admin app any time by
-calling the same `/api/admin/*` endpoints - nothing about the protocol is
-tied to that page.
+in, list players, edit balance/level/win-multiplier. It's there so you have
+something usable immediately; swap it for (or add to it) a dedicated admin
+app any time by calling the same `/api/admin/*` endpoints - nothing about
+the protocol is tied to that page.
 
 ## Deploying on Debian 12
 

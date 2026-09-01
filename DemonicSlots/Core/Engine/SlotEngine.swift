@@ -32,18 +32,28 @@ nonisolated struct SlotEngine: Sendable {
 
     /// Computes one complete spin outcome. Throws `SlotEngineError` for a
     /// malformed definition instead of crashing or producing garbage.
+    /// `probabilityContext` defaults to `.neutral` (no bonus/penalty) so
+    /// every existing caller/test is unaffected; `SpinSessionController` is
+    /// the one caller that computes and passes a real one, from the
+    /// player's level/win-chance multiplier via `PlayerProgressionService`.
     func spin(
         definition: SlotGameDefinition,
         betPerLine: Int64,
         isFreeSpin: Bool,
         freeSpinMultiplier: Int64,
+        probabilityContext: GameProbabilityContext = .neutral,
         randomSource: inout any RandomNumberSource
     ) throws -> SpinEvaluation {
         let problems = definition.validate()
         guard problems.isEmpty else { throw SlotEngineError.invalidDefinition(problems) }
 
         let placeholder = definition.symbols[0].id
-        let stopIndices = ReelSpinner.stopIndices(for: definition.reelStrips, randomSource: &randomSource)
+        let stopIndices = ReelSpinner.stopIndices(
+            for: definition.reelStrips,
+            definition: definition,
+            probabilityContext: probabilityContext,
+            randomSource: &randomSource
+        )
         let grid = ReelSpinner.visibleGrid(
             stopIndices: stopIndices,
             reelStrips: definition.reelStrips,
