@@ -231,13 +231,50 @@ SlotEngine / RiskLadderEngine
   Wahrscheinlichkeit erzeugen.
 - **Server bleibt Quelle der Wahrheit:** `level`/`winChanceMultiplier`
   werden ausschließlich von `AccountSyncController` aus einer
-  Register-/Sync-Antwort geschrieben, nie von Gameplay-Code - eine
-  zukünftige Admin-App ändert sie über `PATCH /api/admin/players/:username`
-  (siehe `backend/README.md`), die App übernimmt den neuen Wert beim
-  nächsten Sync automatisch, ganz ohne Sonderweg für diese beiden Felder.
+  Register-/Sync-Antwort geschrieben, nie direkt von Gameplay-Code. Die
+  Admin-App ändert sie über `PATCH /api/admin/players/:id` (siehe
+  `backend/README.md` - Spieler werden dort über ihre stabile, unveränderliche
+  `id` adressiert, nicht über den änderbaren `username`); die App übernimmt
+  jeden neuen Wert beim nächsten Sync automatisch, ganz ohne Sonderweg für
+  diese Felder.
 - **Level ≠ Coins:** Level wird ausschließlich als gespeicherter
   Profilwert behandelt, niemals aus dem Coin-Guthaben berechnet - ein Spieler
   mit vielen Coins ist nicht automatisch hochstufig.
+
+### XP: Level wird durch Spielen automatisch erreicht
+
+Level steigt nicht nur, wenn du es im Admin-Panel setzt, sondern auch von
+selbst durch Spielen - beides gleichzeitig, ohne Widerspruch:
+
+- **XP-Quelle:** Jeder eingesetzte Coin zählt 1:1 als XP
+  (`WalletService.awardXP`, aufgerufen genau dort, wo auch
+  `GameStatistics.record(wager:)` läuft - `SpinTransactionService.
+  finalizeSpin`/`RiskLadderSessionController.settleRound`). Freispiele
+  kosten keinen Einsatz und bringen konsistent auch keine XP.
+  `PlayerProfile.totalXP` ist rein clientseitig, wächst nur, wird nie von
+  einer Sync-Antwort überschrieben und nie kleiner.
+- **XP → Level:** `PlayerProgressionService.cumulativeXPRequired(forLevel:)`
+  ist eine einfache dreieckige Kurve (`xpStep * level * (level-1) / 2`,
+  `xpStep = 500` in `PlayerLevelConfiguration`) - Level 2 kostet 500 XP
+  insgesamt, Level 10 (Deckel des Win-Bonus) 22.500, Level 30 (Deckel der
+  Bet-Tiers) 217.500, Level 100 (absolutes Maximum) 2.475.000. Startwert,
+  keine gemessene Balance - `xpStep` ist der eine Wert zum Nachjustieren.
+- **Anspruch, kein Zwang:** Bei jedem Sync berechnet der Client sein
+  eigenes `PlayerProgressionService.level(forTotalXP:)` und schickt es nur
+  dann als `earnedLevel` mit, wenn es über dem zuletzt bekannten
+  Server-Level liegt (`AccountSyncController.syncSilently`). Der Server
+  (`POST /api/players/sync`, siehe `backend/README.md`) wendet
+  `newLevel = max(aktuellesLevel, earnedLevel)` an - ein XP-Anspruch kann
+  das Level also nur anheben, nie absenken, und ein Admin-Boost über das,
+  was die eigene Spielzeit bisher hergibt, bleibt beim nächsten Sync
+  unangetastet stehen.
+- **Fortschrittsbalken:** `PlayerProgressionService.xpProgress(totalXP:
+  currentLevel:)` liefert `xpIntoLevel`/`xpForNextLevel`/`fraction` relativ
+  zum *gespeicherten* Level (nicht zum reinen XP-Level) - nach einem
+  Admin-Boost zeigt der Balken also ehrlich "noch nichts" statt einer
+  verwirrenden "schon über 100 %"-Anzeige, bis die echte Spielzeit
+  nachgezogen hat. `nil` ab Level 100 (nichts mehr, wohin fortzuschreiten
+  wäre). Angezeigt in `ProfileSheetView`.
 
 ## Wichtige Spielregeln (Kurzreferenz)
 

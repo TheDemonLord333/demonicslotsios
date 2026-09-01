@@ -60,15 +60,17 @@ struct ProfileSheetView: View {
     private var progressionSummary: some View {
         let profile = profiles.first
         let level = Int(profile?.level ?? 1)
+        let totalXP = profile?.totalXP ?? 0
         let playerMultiplier = profile?.winChanceMultiplier ?? 1.0
         let levelMultiplier = PlayerProgressionService.levelWinMultiplier(forLevel: level)
         let validatedPlayerMultiplier = PlayerProgressionService.validatedWinChanceMultiplier(playerMultiplier)
         let finalMultiplier = levelMultiplier * validatedPlayerMultiplier
 
-        return VStack(spacing: 6) {
+        return VStack(spacing: 10) {
             Text("Level \(level)")
                 .font(.headline)
                 .foregroundStyle(DemonicPalette.boneIvory)
+            levelProgressBar(totalXP: totalXP, currentLevel: level)
             HStack(spacing: 16) {
                 progressionStat(title: "Level-Bonus", multiplier: levelMultiplier)
                 progressionStat(title: "Spieler-Bonus", multiplier: validatedPlayerMultiplier)
@@ -79,6 +81,53 @@ struct ProfileSheetView: View {
         .frame(maxWidth: .infinity)
         .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
         .accessibilityElement(children: .combine)
+    }
+
+    /// XP progress toward the next level, earned purely by playing (see
+    /// `WalletService.awardXP`/`PlayerProgressionService.xpProgress` for
+    /// where the numbers come from). Shown as a plain capsule bar rather
+    /// than a numeric XP count, which would mean nothing without also
+    /// explaining the underlying formula - the bar alone already answers
+    /// "how close am I". A caption underneath spells out the fraction for
+    /// anyone who wants the actual number. At `maximumLevel`, `xpProgress`
+    /// returns `nil` and this renders a filled bar with a "Max. Level
+    /// erreicht" caption instead of a fraction that would divide by
+    /// nothing.
+    private func levelProgressBar(totalXP: Int64, currentLevel: Int) -> some View {
+        let progress = PlayerProgressionService.xpProgress(totalXP: totalXP, currentLevel: currentLevel)
+        let fraction = progress?.fraction ?? 1.0
+
+        return VStack(spacing: 4) {
+            GeometryReader { geometry in
+                ZStack(alignment: .leading) {
+                    Capsule()
+                        .fill(DemonicPalette.boneIvory.opacity(0.15))
+                    Capsule()
+                        .fill(
+                            LinearGradient(
+                                colors: [DemonicPalette.glowingViolet, DemonicPalette.emberOrange],
+                                startPoint: .leading,
+                                endPoint: .trailing
+                            )
+                        )
+                        .frame(width: geometry.size.width * min(max(fraction, 0), 1))
+                        .shadow(color: DemonicPalette.emberOrange.opacity(0.6), radius: 4)
+                }
+            }
+            .frame(height: 10)
+
+            Text(progressCaption(progress: progress))
+                .font(.caption2)
+                .foregroundStyle(DemonicPalette.boneIvory.opacity(0.6))
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Fortschritt zum nächsten Level")
+        .accessibilityValue(progressCaption(progress: progress))
+    }
+
+    private func progressCaption(progress: (xpIntoLevel: Int64, xpForNextLevel: Int64, fraction: Double)?) -> String {
+        guard let progress else { return "Maximales Level erreicht" }
+        return "\(progress.xpIntoLevel) / \(progress.xpForNextLevel) XP bis zum nächsten Level"
     }
 
     private func progressionStat(title: String, multiplier: Double, emphasized: Bool = false) -> some View {

@@ -52,6 +52,54 @@ struct SpinTransactionServiceTests {
         #expect(statistics.totalSpins == 1)
     }
 
+    @Test func finalizingASpinAwardsXPEqualToTheWagerExactlyOnce() {
+        let context = makeContext()
+        let wallet = WalletService(context: context)
+        let engine = SlotEngine()
+        let service = SpinTransactionService(context: context, wallet: wallet, engine: engine)
+        let definition = InfernalForgeDefinition.definition
+        var random: any RandomNumberSource = SeededRandomSource(seed: 99)
+
+        let result = service.prepareSpin(definition: definition, betPerLine: 10, isFreeSpin: false, freeSpinMultiplier: 1, randomSource: &random)
+        guard case .prepared(let pending, let evaluation) = result else {
+            Issue.record("Expected the spin to prepare successfully")
+            return
+        }
+        let totalBet = definition.totalBet(betPerLine: 10)
+
+        let statistics = GameStatistics(gameID: definition.id.rawValue)
+        context.insert(statistics)
+
+        _ = service.finalizeSpin(pending: pending, evaluation: evaluation, statistics: statistics)
+        #expect(wallet.currentProfile().totalXP == totalBet)
+
+        // Re-finalizing the same (already-settled) pending spin must not
+        // award XP a second time, mirroring the payout's own idempotency.
+        _ = service.finalizeSpin(pending: pending, evaluation: evaluation, statistics: statistics)
+        #expect(wallet.currentProfile().totalXP == totalBet)
+    }
+
+    @Test func aFreeSpinAwardsNoXP() {
+        let context = makeContext()
+        let wallet = WalletService(context: context)
+        let engine = SlotEngine()
+        let service = SpinTransactionService(context: context, wallet: wallet, engine: engine)
+        let definition = InfernalForgeDefinition.definition
+        var random: any RandomNumberSource = SeededRandomSource(seed: 99)
+
+        let result = service.prepareSpin(definition: definition, betPerLine: 10, isFreeSpin: true, freeSpinMultiplier: 1, randomSource: &random)
+        guard case .prepared(let pending, let evaluation) = result else {
+            Issue.record("Expected the free spin to prepare successfully")
+            return
+        }
+
+        let statistics = GameStatistics(gameID: definition.id.rawValue)
+        context.insert(statistics)
+
+        _ = service.finalizeSpin(pending: pending, evaluation: evaluation, statistics: statistics)
+        #expect(wallet.currentProfile().totalXP == 0)
+    }
+
     @Test func insufficientFundsNeverDebitsTheWallet() {
         let context = makeContext()
         let wallet = WalletService(context: context)

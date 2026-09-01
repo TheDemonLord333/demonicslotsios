@@ -61,6 +61,19 @@ final class PlayerProfile {
     var level: Int64 = 1
     var winChanceMultiplier: Double = 1.0
 
+    /// Cumulative XP earned by wagering, purely client-side (see
+    /// `WalletService.awardXP`/`PlayerProgressionService`). Unlike `level`
+    /// itself, this is never server-authoritative and never overwritten by
+    /// a sync response - it only ever grows, forever, from real play. It's
+    /// what actually drives leveling up: `AccountSyncController` compares
+    /// `PlayerProgressionService.level(forTotalXP:)` against the currently
+    /// known `level` on every sync and, if XP has earned a higher one,
+    /// asks the backend to raise it (never lower it - an admin-set level
+    /// above the player's own XP pace is never walked back by playing).
+    // `= 0` here for the same lightweight-migration reason as
+    // `lastKnownAdminRevision`/`level` above.
+    var totalXP: Int64 = 0
+
     // `profileID` defaults to the literal, not `PlayerProfile.singletonID`:
     // default parameter expressions are evaluated in a nonisolated context
     // and can't reference a MainActor-isolated static property. Must stay
@@ -76,7 +89,8 @@ final class PlayerProfile {
         lastKnownAdminRevision: Int64 = 0,
         lastSyncedAt: Date? = nil,
         level: Int64 = 1,
-        winChanceMultiplier: Double = 1.0
+        winChanceMultiplier: Double = 1.0,
+        totalXP: Int64 = 0
     ) {
         self.profileID = profileID
         self.soulCoinBalance = soulCoinBalance
@@ -89,6 +103,7 @@ final class PlayerProfile {
         self.lastSyncedAt = lastSyncedAt
         self.level = level
         self.winChanceMultiplier = winChanceMultiplier
+        self.totalXP = totalXP
     }
 
     static let singletonID = "player.singleton"

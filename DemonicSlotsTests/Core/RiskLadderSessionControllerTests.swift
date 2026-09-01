@@ -97,6 +97,9 @@ struct RiskLadderSessionControllerTests {
         #expect(controller.lastRoundPayout == 0)
         // The stake was already taken at start and is never refunded on a loss.
         #expect(controller.wallet.balance == startBalance - stake)
+        // A loss still wagered the stake, so it still earns XP - the
+        // outcome of the round doesn't change what was actually risked.
+        #expect(controller.wallet.currentProfile().totalXP == stake)
     }
 
     @Test func cashOutPaysExactlyOnceEvenWithARapidDoubleTap() async throws {

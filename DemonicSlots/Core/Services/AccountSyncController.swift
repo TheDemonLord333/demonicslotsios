@@ -15,6 +15,13 @@
 //  the server, which always overwrites the local value; otherwise the
 //  local (gameplay-driven) balance is pushed up.
 //
+//  Every sync also carries this device's locally-earned level (from
+//  `PlayerProfile.totalXP` via `PlayerProgressionService.level(forTotalXP:)`)
+//  when it's above what the server last had, and always applies whatever
+//  `level`/`winChanceMultiplier` the server responds with - level itself
+//  stays server-authoritative either way, this only ever proposes raising
+//  it, never lowers it locally.
+//
 import Foundation
 import SwiftData
 import Observation
@@ -112,11 +119,20 @@ final class AccountSyncController {
         defer { isSyncing = false }
 
         if reportErrors { state = .working }
+
+        // Only claim a level-up when local XP actually justifies one above
+        // what this device last knew the server to have - never send a
+        // lower or equal value, the server would just ignore it anyway
+        // (see BackendSyncService.sync's doc comment).
+        let xpLevel = PlayerProgressionService.level(forTotalXP: profile.totalXP)
+        let earnedLevel: Int64? = Int64(xpLevel) > profile.level ? Int64(xpLevel) : nil
+
         let outcome = await backend.sync(
             username: username,
             deviceToken: deviceToken,
             localBalance: profile.soulCoinBalance,
-            lastKnownAdminRevision: profile.lastKnownAdminRevision
+            lastKnownAdminRevision: profile.lastKnownAdminRevision,
+            earnedLevel: earnedLevel
         )
 
         switch outcome {

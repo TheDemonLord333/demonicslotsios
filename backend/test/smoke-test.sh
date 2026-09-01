@@ -100,6 +100,23 @@ expect_field "resolution is still client_applied" "client_applied" "$(json_field
 expect_field "sync carries the new level" "12" "$(json_field level < /tmp/smoke_resp.json)"
 expect_field "sync carries the new winChanceMultiplier" "1.08" "$(json_field winChanceMultiplier < /tmp/smoke_resp.json)"
 
+echo "== a client-claimed earnedLevel raises the stored level, but never lowers it =="
+STATUS=$(curl -s -o /tmp/smoke_resp.json -w "%{http_code}" -X POST "$BASE_URL/api/players/sync" \
+  -H "Content-Type: application/json" \
+  -d "{\"username\":\"$USERNAME\",\"deviceToken\":\"$DEVICE_TOKEN\",\"localBalance\":4200,\"lastKnownAdminRevision\":$REVISION_BEFORE,\"earnedLevel\":40}")
+expect_status "sync with a higher earnedLevel" 200 "$STATUS"
+expect_field "level raised to the claimed value" "40" "$(json_field level < /tmp/smoke_resp.json)"
+STATUS=$(curl -s -o /tmp/smoke_resp.json -w "%{http_code}" -X POST "$BASE_URL/api/players/sync" \
+  -H "Content-Type: application/json" \
+  -d "{\"username\":\"$USERNAME\",\"deviceToken\":\"$DEVICE_TOKEN\",\"localBalance\":4200,\"lastKnownAdminRevision\":$REVISION_BEFORE,\"earnedLevel\":3}")
+expect_status "sync with a lower earnedLevel" 200 "$STATUS"
+expect_field "level is NOT lowered by a smaller claim" "40" "$(json_field level < /tmp/smoke_resp.json)"
+STATUS=$(curl -s -o /tmp/smoke_resp.json -w "%{http_code}" -X POST "$BASE_URL/api/players/sync" \
+  -H "Content-Type: application/json" \
+  -d "{\"username\":\"$USERNAME\",\"deviceToken\":\"$DEVICE_TOKEN\",\"localBalance\":4200,\"lastKnownAdminRevision\":$REVISION_BEFORE,\"earnedLevel\":99999}")
+expect_status "sync with an out-of-range earnedLevel is not an error" 200 "$STATUS"
+expect_field "out-of-range claim is ignored, not applied" "40" "$(json_field level < /tmp/smoke_resp.json)"
+
 echo "== invalid level/winChanceMultiplier are rejected, not silently clamped =="
 STATUS=$(curl -s -o /dev/null -w "%{http_code}" -X PATCH "$BASE_URL/api/admin/players/$PLAYER_ID" \
   -H "Authorization: Bearer $ADMIN_TOKEN" -H "Content-Type: application/json" -d '{"level":-500}')

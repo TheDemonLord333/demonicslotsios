@@ -11,6 +11,67 @@ import Testing
 @testable import DemonicSlots
 
 struct PlayerProgressionServiceTests {
+    // MARK: - XP / leveling
+
+    @Test func levelOneRequiresNoXP() {
+        #expect(PlayerProgressionService.cumulativeXPRequired(forLevel: 1) == 0)
+    }
+
+    @Test func cumulativeXPRequiredMatchesTheDocumentedTriangularCurve() {
+        // xpStep = 500 in the starting configuration; see
+        // PlayerLevelConfiguration.xpStep's header comment for these exact
+        // worked values.
+        #expect(PlayerProgressionService.cumulativeXPRequired(forLevel: 2) == 500)
+        #expect(PlayerProgressionService.cumulativeXPRequired(forLevel: 10) == 22_500)
+        #expect(PlayerProgressionService.cumulativeXPRequired(forLevel: 30) == 217_500)
+        #expect(PlayerProgressionService.cumulativeXPRequired(forLevel: 100) == 2_475_000)
+    }
+
+    @Test func levelForTotalXPStartsAtOneWithNoXP() {
+        #expect(PlayerProgressionService.level(forTotalXP: 0) == 1)
+    }
+
+    @Test func levelForTotalXPStaysAtTheFloorUntilTheThresholdIsReached() {
+        // One XP short of level 2's 500 threshold: still level 1.
+        #expect(PlayerProgressionService.level(forTotalXP: 499) == 1)
+        #expect(PlayerProgressionService.level(forTotalXP: 500) == 2)
+    }
+
+    @Test func levelForTotalXPFindsTheHighestLevelJustified() {
+        // Exactly level 10's threshold, and one short of level 11's next step.
+        #expect(PlayerProgressionService.level(forTotalXP: 22_500) == 10)
+        #expect(PlayerProgressionService.level(forTotalXP: 22_500 + 5_000 - 1) == 10)
+        #expect(PlayerProgressionService.level(forTotalXP: 22_500 + 5_000) == 11)
+    }
+
+    @Test func levelForTotalXPNeverExceedsTheMaximumLevel() {
+        #expect(PlayerProgressionService.level(forTotalXP: 999_999_999) == PlayerProgressionService.maximumLevel)
+    }
+
+    @Test func levelForTotalXPTreatsNegativeXPAsZero() {
+        #expect(PlayerProgressionService.level(forTotalXP: -1) == 1)
+    }
+
+    @Test func xpProgressReflectsHowFarIntoTheCurrentLevel() {
+        // Level 1 -> 2 costs 500 total; 200 in means 200/500, 40%.
+        let progress = PlayerProgressionService.xpProgress(totalXP: 200, currentLevel: 1)
+        #expect(progress?.xpIntoLevel == 200)
+        #expect(progress?.xpForNextLevel == 500)
+        #expect(abs((progress?.fraction ?? 0) - 0.4) < 0.0001)
+    }
+
+    @Test func xpProgressIsNilAtTheMaximumLevel() {
+        #expect(PlayerProgressionService.xpProgress(totalXP: 999_999_999, currentLevel: PlayerProgressionService.maximumLevel) == nil)
+    }
+
+    @Test func xpProgressNeverGoesNegativeAfterAnAdminBoostAboveTheXPPace() {
+        // Stored level 50 (admin-boosted) but only enough real XP for
+        // level 3 - progress toward 51 must clamp to 0, not go negative.
+        let progress = PlayerProgressionService.xpProgress(totalXP: 1_000, currentLevel: 50)
+        #expect(progress?.xpIntoLevel == 0)
+        #expect(progress?.fraction == 0)
+    }
+
     // MARK: - Bet tiers / max bet
 
     @Test func level1GetsTheBaseMaxBet() {

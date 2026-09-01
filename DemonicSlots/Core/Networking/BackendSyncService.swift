@@ -84,21 +84,30 @@ nonisolated struct BackendSyncService: Sendable {
         }
     }
 
+    /// `earnedLevel`: the level `PlayerProgressionService.level(forTotalXP:)`
+    /// currently justifies from local play, passed only when it's above
+    /// what this device last knew the server to have (see
+    /// `AccountSyncController.syncSilently` - never sent otherwise, since
+    /// the server would just no-op it anyway). The server only ever raises
+    /// its stored level from this, never lowers it - an admin-set level
+    /// above the player's own XP pace is never walked back by playing.
     func sync(
         username: String,
         deviceToken: String,
         localBalance: Int64,
-        lastKnownAdminRevision: Int64
+        lastKnownAdminRevision: Int64,
+        earnedLevel: Int64? = nil
     ) async -> SyncOutcome {
-        guard let request = makeRequest(
-            path: "api/players/sync",
-            body: [
-                "username": username,
-                "deviceToken": deviceToken,
-                "localBalance": localBalance,
-                "lastKnownAdminRevision": lastKnownAdminRevision,
-            ]
-        ) else {
+        var body: [String: Any] = [
+            "username": username,
+            "deviceToken": deviceToken,
+            "localBalance": localBalance,
+            "lastKnownAdminRevision": lastKnownAdminRevision,
+        ]
+        if let earnedLevel {
+            body["earnedLevel"] = earnedLevel
+        }
+        guard let request = makeRequest(path: "api/players/sync", body: body) else {
             return .networkError("Ungültige Anfrage.")
         }
 
