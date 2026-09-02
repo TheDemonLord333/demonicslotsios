@@ -78,7 +78,7 @@ final class AccountSyncController {
         let outcome = await backend.register(username: trimmed, initialBalance: profile.soulCoinBalance)
 
         switch outcome {
-        case .success(let returnedUsername, let deviceToken, let coinBalance, let adminRevision, let level, let winChanceMultiplier):
+        case .success(let returnedUsername, let deviceToken, let coinBalance, let adminRevision, let level, let winChanceMultiplier, let guaranteedJackpot):
             profile.onlineUsername = returnedUsername
             profile.deviceToken = deviceToken
             profile.lastKnownAdminRevision = adminRevision
@@ -89,6 +89,7 @@ final class AccountSyncController {
             // PlayerProgressionService's own header comment.
             profile.level = Int64(PlayerProgressionService.validatedLevel(Int(level)))
             profile.winChanceMultiplier = PlayerProgressionService.validatedWinChanceMultiplier(winChanceMultiplier)
+            profile.hasGuaranteedJackpot = guaranteedJackpot
             profile.lastSyncedAt = .now
             try? context.save()
             username = returnedUsername
@@ -136,20 +137,22 @@ final class AccountSyncController {
         )
 
         switch outcome {
-        case .serverWins(let coinBalance, let adminRevision, let level, let winChanceMultiplier):
+        case .serverWins(let coinBalance, let adminRevision, let level, let winChanceMultiplier, let guaranteedJackpot):
             wallet.setBalance(coinBalance)
             profile.lastKnownAdminRevision = adminRevision
             profile.level = Int64(PlayerProgressionService.validatedLevel(Int(level)))
             profile.winChanceMultiplier = PlayerProgressionService.validatedWinChanceMultiplier(winChanceMultiplier)
+            profile.hasGuaranteedJackpot = guaranteedJackpot
             profile.lastSyncedAt = .now
             try? context.save()
             lastSyncedAt = profile.lastSyncedAt
             if reportErrors { state = .idle }
             return true
-        case .clientApplied(let adminRevision, let level, let winChanceMultiplier):
+        case .clientApplied(let adminRevision, let level, let winChanceMultiplier, let guaranteedJackpot):
             profile.lastKnownAdminRevision = adminRevision
             profile.level = Int64(PlayerProgressionService.validatedLevel(Int(level)))
             profile.winChanceMultiplier = PlayerProgressionService.validatedWinChanceMultiplier(winChanceMultiplier)
+            profile.hasGuaranteedJackpot = guaranteedJackpot
             profile.lastSyncedAt = .now
             try? context.save()
             lastSyncedAt = profile.lastSyncedAt

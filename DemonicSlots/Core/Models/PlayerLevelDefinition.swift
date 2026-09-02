@@ -4,9 +4,10 @@
 //
 //  One entry in the central level-progression table (see
 //  `PlayerLevelConfiguration`): the win-chance bonus a player gets simply
-//  for having reached `level`. Deliberately separate from bet limits
-//  (`BetTier`) - the task that introduced this asked for the two to stay
-//  independently configurable.
+//  for having reached `level`. Deliberately separate from bet limits (see
+//  `PlayerProgressionService.maxBet(forLevel:betTierStartIndex:)`) - the
+//  task that introduced this asked for the two to stay independently
+//  configurable.
 //
 import Foundation
 

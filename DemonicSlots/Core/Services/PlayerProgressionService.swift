@@ -83,8 +83,11 @@ nonisolated enum PlayerProgressionService {
     /// `SpinSessionController`/`RiskLadderSessionController` make once per
     /// spin/round instead of every mechanic loading these values itself
     /// (see that type's header comment on why that centralization matters).
-    static func probabilityContext(level: Int, playerMultiplier: Double) -> GameProbabilityContext {
-        GameProbabilityContext(finalWinMultiplier: finalWinMultiplier(level: level, playerMultiplier: playerMultiplier))
+    static func probabilityContext(level: Int, playerMultiplier: Double, guaranteesJackpot: Bool = false) -> GameProbabilityContext {
+        GameProbabilityContext(
+            finalWinMultiplier: finalWinMultiplier(level: level, playerMultiplier: playerMultiplier),
+            guaranteesJackpot: guaranteesJackpot
+        )
     }
 
     /// The literal `effectiveProbability = baseProbability * multiplier`
@@ -159,44 +162,71 @@ nonisolated enum PlayerProgressionService {
 
     // MARK: - Bet limits
 
-    /// The global max bet unlocked at `level` - the highest bet tier whose
-    /// `minimumLevel` the player has reached. Falls back to the lowest
-    /// configured tier's limit if `PlayerLevelConfiguration.betTiers` were
-    /// ever emptied by mistake, rather than allowing an unlimited bet.
-    static func maxBet(forLevel level: Int) -> Int64 {
+    /// The shared stake ladder every game's own bet-tier progression is a
+    /// slice of: `10, 25, 50, 100, 250, 500, 1000, 2500, 5000, 10000,
+    /// 25000, 50000, ...` - each decade repeats the same ×1, ×2.5, ×5
+    /// pattern (`10^n`, `2.5 * 10^n`, `5 * 10^n` for `n = 1, 2, 3, ...`),
+    /// so any index has a closed-form value with no table to run off the
+    /// end of. Integer-exact throughout (a power of ten is always evenly
+    /// divisible by 2, so `* 5 / 2` never truncates) - deliberately never
+    /// floating-point, these numbers back real Soul Coin bet amounts.
+    /// `index` must be `>= 0`.
+    static func stakeSequenceValue(atIndex index: Int) -> Int64 {
+        let safeIndex = max(index, 0)
+        let decade = safeIndex / 3
+        let stepInDecade = safeIndex % 3 // 0, 1, 2 -> ×1, ×2.5, ×5
+        var power: Int64 = 1
+        for _ in 0...decade { power *= 10 } // 10^(decade + 1)
+        switch stepInDecade {
+        case 0: return power
+        case 1: return power * 5 / 2
+        default: return power * 5
+        }
+    }
+
+    /// The max bet unlocked at `level` for a game whose level-1 starting
+    /// point in the shared stake ladder is `betTierStartIndex` (see
+    /// `SlotGameDefinition.betTierStartIndex`'s doc comment). Flat between
+    /// milestones, advancing one step up the ladder every
+    /// `PlayerLevelConfiguration.levelsPerBetTierStep` levels - e.g. with
+    /// the starting configuration's `levelsPerBetTierStep = 10`, a game
+    /// starting at 250 stays at 250 through level 9, becomes 500 at level
+    /// 10 through 19, 1000 at level 20, and so on up to `maximumLevel`.
+    static func maxBet(forLevel level: Int, betTierStartIndex: Int) -> Int64 {
         let safeLevel = validatedLevel(level)
-        let applicable = PlayerLevelConfiguration.betTiers
-            .filter { $0.minimumLevel <= safeLevel }
-            .max { $0.minimumLevel < $1.minimumLevel }
-        if let applicable { return applicable.maxBet }
-        return PlayerLevelConfiguration.betTiers.map(\.maxBet).min() ?? 0
+        let step = safeLevel / PlayerLevelConfiguration.levelsPerBetTierStep
+        return stakeSequenceValue(atIndex: max(betTierStartIndex, 0) + step)
     }
 
     /// A game's own maximum bet can only ever further restrict the
-    /// player's global limit, never widen it:
-    /// `effectiveMaxBet = min(playerLevelMaxBet, gameMaximumBet)`.
-    static func effectiveMaxBet(level: Int, gameMaximumBet: Int64) -> Int64 {
-        min(maxBet(forLevel: level), max(gameMaximumBet, 0))
+    /// player's level-based limit for *that* game, never widen it:
+    /// `effectiveMaxBet = min(levelMaxBet, gameMaximumBet)`.
+    static func effectiveMaxBet(level: Int, gameMaximumBet: Int64, betTierStartIndex: Int) -> Int64 {
+        min(maxBet(forLevel: level, betTierStartIndex: betTierStartIndex), max(gameMaximumBet, 0))
     }
 
     /// Every bet a game supports (`gameBets`) that the player's current
-    /// level actually unlocks, preserving `gameBets`' original order. Never
-    /// mutates `gameBets` itself - a game's own bet list (e.g.
-    /// `SlotGameDefinition.betLevels`, `RiskLadderConfiguration.stakeLevels`)
-    /// stays the single source of truth for "what this game supports at
-    /// all"; this only filters it down to what's currently unlocked.
-    static func availableBets(gameBets: [Int64], level: Int) -> [Int64] {
-        let limit = maxBet(forLevel: level)
+    /// level actually unlocks *for that game*, preserving `gameBets`'
+    /// original order. Never mutates `gameBets` itself - a game's own bet
+    /// list (`SlotGameDefinition.betLevels`) stays the single source of
+    /// truth for "what this game supports at all"; this only filters it
+    /// down to what's currently unlocked.
+    static func availableBets(gameBets: [Int64], level: Int, betTierStartIndex: Int) -> [Int64] {
+        let limit = maxBet(forLevel: level, betTierStartIndex: betTierStartIndex)
         return gameBets.filter { $0 <= limit }
     }
 
-    /// The lowest level that would unlock `bet`, for showing a locked bet's
-    /// "🔒 Level X" caption - `nil` if no configured tier ever unlocks it
-    /// (the value exceeds even the highest tier's limit).
-    static func unlockLevel(forBet bet: Int64) -> Int? {
-        PlayerLevelConfiguration.betTiers
-            .filter { $0.maxBet >= bet }
-            .min { $0.minimumLevel < $1.minimumLevel }?
-            .minimumLevel
+    /// The lowest level that would unlock `bet` for a game whose ladder
+    /// starts at `betTierStartIndex` - for a locked bet's "🔒 Level X"
+    /// caption. `nil` if `bet` is never reached within `1...maximumLevel`
+    /// (i.e. it exceeds even the value at `maximumLevel`'s own step).
+    static func unlockLevel(forBet bet: Int64, betTierStartIndex: Int) -> Int? {
+        let safeStartIndex = max(betTierStartIndex, 0)
+        let maxStep = maximumLevel / PlayerLevelConfiguration.levelsPerBetTierStep
+        for step in 0...maxStep {
+            guard stakeSequenceValue(atIndex: safeStartIndex + step) >= bet else { continue }
+            return step == 0 ? minimumLevel : step * PlayerLevelConfiguration.levelsPerBetTierStep
+        }
+        return nil
     }
 }

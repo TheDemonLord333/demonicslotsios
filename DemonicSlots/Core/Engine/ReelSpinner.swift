@@ -35,6 +35,18 @@
 //     reason - this only ever engages for a player who actually has a
 //     level bonus or an admin-set multiplier.
 //
+//  Admin "garantierter Jackpot" mode (`GameProbabilityContext.
+//  guaranteesJackpot`) is a different, harder case: forcing an actual
+//  landed *grid* full of the highest-value symbol can't be done by biasing
+//  which `stopIndex` gets picked the way a normal bonus is - the strips are
+//  shuffled once at startup (`InfernalForgeSymbols.buildReelStrips`) and
+//  nothing guarantees the top symbol appears `visibleRows` times in a row
+//  anywhere in a given strip, so no `stopIndex` might even exist that reads
+//  out an all-top-symbol column. `SlotEngine.spin` handles this the honest
+//  way instead: it still calls `stopIndices`/`visibleGrid` normally (so the
+//  reel-stop animation has real indices to land on), then overwrites the
+//  resulting grid outright when this mode is on - see that file.
+//
 import Foundation
 
 nonisolated enum ReelSpinner {
@@ -70,6 +82,17 @@ nonisolated enum ReelSpinner {
         }
     }
 
+    /// The single highest-value symbol in `definition`'s paytable/scatter
+    /// rules (by best per-line payout, or best scatter-trigger multiplier
+    /// for the scatter symbol) - the same symbol `symbolBoostWeights`
+    /// already biases hardest toward, and what "garantierter Jackpot" mode
+    /// forces onto every visible cell (see `SlotEngine.spin`). `nil` only
+    /// if the game defines no positive-value symbol at all (never true for
+    /// a validated definition).
+    static func highestValueSymbol(definition: SlotGameDefinition) -> SymbolID? {
+        rawSymbolValues(definition: definition).max { $0.value < $1.value }?.key
+    }
+
     /// Computes the visible symbol grid from stop indices. `grid[reel][row]`
     /// is read cyclically from that reel's strip starting at its stop index,
     /// so the strip acts as a circular buffer.
@@ -97,6 +120,22 @@ nonisolated enum ReelSpinner {
     /// Empty when the game has nothing to rank against (defensively falls
     /// back to the original uniform roll at the call site above).
     private static func symbolBoostWeights(definition: SlotGameDefinition, multiplierDelta: Double) -> [SymbolID: Double] {
+        let rawValues = rawSymbolValues(definition: definition)
+        guard let maxValue = rawValues.values.max(), maxValue > 0 else { return [:] }
+
+        return rawValues.mapValues { value in
+            let normalizedValue = value / maxValue // > 0, up to 1.0 for the single best symbol
+            // Floor at 0.01 rather than 0: even a harsh admin penalty must
+            // never make a symbol literally impossible to land.
+            return max(1 + multiplierDelta * normalizedValue, 0.01)
+        }
+    }
+
+    /// Raw per-symbol value (best per-line paytable payout, or best
+    /// scatter-trigger multiplier for the scatter symbol) - unnormalized,
+    /// shared by both `symbolBoostWeights` (which normalizes it into
+    /// weights) and `highestValueSymbol` (which just wants the max).
+    private static func rawSymbolValues(definition: SlotGameDefinition) -> [SymbolID: Double] {
         var rawValues: [SymbolID: Double] = [:]
         for entry in definition.paytable {
             guard let best = entry.payoutByMatchCount.values.max(), best > 0 else { continue }
@@ -107,14 +146,7 @@ nonisolated enum ReelSpinner {
                 rawValues[scatterID] = Double(bestScatterMultiplier)
             }
         }
-        guard let maxValue = rawValues.values.max(), maxValue > 0 else { return [:] }
-
-        return rawValues.mapValues { value in
-            let normalizedValue = value / maxValue // > 0, up to 1.0 for the single best symbol
-            // Floor at 0.01 rather than 0: even a harsh admin penalty must
-            // never make a symbol literally impossible to land.
-            return max(1 + multiplierDelta * normalizedValue, 0.01)
-        }
+        return rawValues
     }
 
     /// Weighted discrete sampling over `weights` (one entry per strip

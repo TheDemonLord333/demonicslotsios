@@ -14,6 +14,10 @@ enum SpinTiming {
     static let perReelStagger: Double = 0.15
     static let settleDuration: Double = 0.25
     static let bonusTransitionDuration: Double = 1.1
+    /// Brief pause between one autospin-queued spin ending and the next one
+    /// starting - just enough that consecutive spins read as a deliberate
+    /// sequence rather than a jarring instant restart.
+    static let autoSpinPause: Double = 0.5
 
     static func spinDuration(reelCount: Int) -> Double {
         baseSpinDuration + Double(max(reelCount - 1, 0)) * perReelStagger

@@ -33,6 +33,11 @@ nonisolated enum RiskLadderEngine {
         randomSource: inout any RandomNumberSource
     ) -> Bool {
         guard currentLevel >= 0, currentLevel < configuration.count else { return false }
+        // The admin "garantierter Jackpot" mode: every climb succeeds
+        // outright, no roll at all - see GameProbabilityContext.
+        // guaranteesJackpot's doc comment for why this has to be a literal
+        // bypass rather than just an extreme probability.
+        if probabilityContext.guaranteesJackpot { return true }
         let baseProbability = min(max(configuration[currentLevel].successProbability, 0), 1)
         let probability = probabilityContext.adjustedProbability(base: baseProbability)
         let threshold = Int((probability * Double(probabilityResolution)).rounded())

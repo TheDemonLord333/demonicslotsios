@@ -17,10 +17,28 @@ nonisolated struct GameProbabilityContext: Sendable, Equatable {
     /// `PlayerProgressionService`. `1.0` means "no bonus or penalty at all".
     let finalWinMultiplier: Double
 
+    /// The admin "garantierter Jackpot"-Modus (`PlayerProfile.
+    /// hasGuaranteedJackpot`, settable only from the admin app - never by
+    /// gameplay). When `true`, every mechanic that consults this context
+    /// forces the best possible outcome outright instead of rolling at
+    /// all - `RiskLadderEngine.attemptClimb` always succeeds,
+    /// `SlotEngine.spin` fills the whole grid with the highest-value
+    /// symbol. Deliberately a hard, unconditional override rather than
+    /// just an extreme `finalWinMultiplier`: a multiplier still runs
+    /// through `adjustedProbability`'s cap (`maximumEffectiveWinChance`,
+    /// 95% by default) and normal RNG, so it alone could never actually
+    /// deliver "immer" (always) - only a literal bypass can.
+    let guaranteesJackpot: Bool
+
     /// No bonus/penalty - every mechanic behaves exactly as if this feature
     /// didn't exist. The default everywhere, so every pre-existing call
     /// site/test that doesn't pass a context explicitly is unaffected.
-    static let neutral = GameProbabilityContext(finalWinMultiplier: 1.0)
+    static let neutral = GameProbabilityContext(finalWinMultiplier: 1.0, guaranteesJackpot: false)
+
+    init(finalWinMultiplier: Double, guaranteesJackpot: Bool = false) {
+        self.finalWinMultiplier = finalWinMultiplier
+        self.guaranteesJackpot = guaranteesJackpot
+    }
 
     /// The literal `effectiveProbability = baseProbability * multiplier`
     /// formula, clamped to `0...cap`. Used directly by mechanics that

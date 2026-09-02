@@ -72,60 +72,87 @@ struct PlayerProgressionServiceTests {
         #expect(progress?.fraction == 0)
     }
 
-    // MARK: - Bet tiers / max bet
+    // MARK: - Shared stake ladder
 
-    @Test func level1GetsTheBaseMaxBet() {
-        #expect(PlayerProgressionService.maxBet(forLevel: 1) == 100)
+    @Test func stakeSequenceFollowsTheDocumentedOneTwoPointFiveFivePattern() {
+        let expected: [Int64] = [10, 25, 50, 100, 250, 500, 1_000, 2_500, 5_000, 10_000, 25_000, 50_000]
+        for (index, value) in expected.enumerated() {
+            #expect(PlayerProgressionService.stakeSequenceValue(atIndex: index) == value)
+        }
+    }
+
+    @Test func stakeSequenceNegativeIndexClampsToZero() {
+        #expect(PlayerProgressionService.stakeSequenceValue(atIndex: -5) == PlayerProgressionService.stakeSequenceValue(atIndex: 0))
+    }
+
+    // MARK: - Bet tiers / max bet (per game, via betTierStartIndex)
+
+    @Test func level1GetsTheGamesOwnStartingStake() {
+        // Index 3 in the shared ladder is 100.
+        #expect(PlayerProgressionService.maxBet(forLevel: 1, betTierStartIndex: 3) == 100)
     }
 
     @Test func maxBetStaysFlatBetweenTierMilestones() {
-        // Level 4 is still within tier 1 (levels 1-4): must NOT have
-        // climbed just because the level went up.
-        #expect(PlayerProgressionService.maxBet(forLevel: 4) == 100)
-        // Same for 11-14, all still tier 3 (level 10's 500 limit).
-        #expect(PlayerProgressionService.maxBet(forLevel: 11) == 500)
-        #expect(PlayerProgressionService.maxBet(forLevel: 14) == 500)
+        // Level 9 is still one step short of the next milestone (10): must
+        // NOT have climbed just because the level went up.
+        #expect(PlayerProgressionService.maxBet(forLevel: 9, betTierStartIndex: 3) == 100)
+        #expect(PlayerProgressionService.maxBet(forLevel: 19, betTierStartIndex: 3) == 250)
     }
 
     @Test func eachMilestoneLevelUnlocksTheNextTier() {
-        #expect(PlayerProgressionService.maxBet(forLevel: 5) == 250)
-        #expect(PlayerProgressionService.maxBet(forLevel: 10) == 500)
-        #expect(PlayerProgressionService.maxBet(forLevel: 15) == 1_000)
-        #expect(PlayerProgressionService.maxBet(forLevel: 20) == 2_500)
-        #expect(PlayerProgressionService.maxBet(forLevel: 25) == 5_000)
-        #expect(PlayerProgressionService.maxBet(forLevel: 30) == 10_000)
+        #expect(PlayerProgressionService.maxBet(forLevel: 10, betTierStartIndex: 3) == 250)
+        #expect(PlayerProgressionService.maxBet(forLevel: 20, betTierStartIndex: 3) == 500)
+        #expect(PlayerProgressionService.maxBet(forLevel: 30, betTierStartIndex: 3) == 1_000)
     }
 
-    @Test func maxBetAtTheHighestConfiguredLevelKeepsTheTopTier() {
-        #expect(PlayerProgressionService.maxBet(forLevel: 100) == 10_000)
+    @Test func maxBetAtTheHighestLevelReachesTheFarEndOfTheLadder() {
+        // Level 100 -> step 10 -> index 13 -> 250,000.
+        #expect(PlayerProgressionService.maxBet(forLevel: 100, betTierStartIndex: 3) == 250_000)
     }
 
-    @Test func gameMaxBetCanRestrictTheGlobalMaxBetButNeverWidenIt() {
-        // Player is level 30 (global max bet 10,000), but this game only
-        // supports up to 5,000 - the game's own limit wins.
-        #expect(PlayerProgressionService.effectiveMaxBet(level: 30, gameMaximumBet: 5_000) == 5_000)
-        // A game that supports MORE than the global limit is still capped
+    @Test func differentGamesWithDifferentStartIndicesUnlockDifferentAmountsAtTheSameLevel() {
+        // The task's own worked example: Infernal Forge (index 4, 250 at
+        // level 1, 500 at level 10) vs. Demonic Risk Ladder (index 5, 500
+        // at level 1, 1000 at level 10).
+        #expect(PlayerProgressionService.maxBet(forLevel: 1, betTierStartIndex: 4) == 250)
+        #expect(PlayerProgressionService.maxBet(forLevel: 10, betTierStartIndex: 4) == 500)
+        #expect(PlayerProgressionService.maxBet(forLevel: 1, betTierStartIndex: 5) == 500)
+        #expect(PlayerProgressionService.maxBet(forLevel: 10, betTierStartIndex: 5) == 1_000)
+    }
+
+    @Test func gameMaxBetCanRestrictTheLevelMaxBetButNeverWidenIt() {
+        // This game only supports up to 500 - its own limit wins even
+        // though the player's level would otherwise unlock more.
+        #expect(PlayerProgressionService.effectiveMaxBet(level: 30, gameMaximumBet: 500, betTierStartIndex: 3) == 500)
+        // A game that supports MORE than the level allows is still capped
         // by the player's level.
-        #expect(PlayerProgressionService.effectiveMaxBet(level: 12, gameMaximumBet: 10_000) == 500)
+        #expect(PlayerProgressionService.effectiveMaxBet(level: 10, gameMaximumBet: 10_000, betTierStartIndex: 3) == 250)
     }
 
     @Test func availableBetsOnlyIncludesBetsTheLevelUnlocks() {
-        let gameBets: [Int64] = [10, 25, 50, 100, 250, 500, 1_000, 2_500, 5_000]
-        // Level 7 -> tier 3 not yet reached (needs level 10) -> max bet 250.
-        let available = PlayerProgressionService.availableBets(gameBets: gameBets, level: 7)
-        #expect(available == [10, 25, 50, 100, 250])
+        let gameBets: [Int64] = [10, 25, 50, 100, 250, 500, 1_000]
+        // Level 9, index 3 -> max bet still 100 (next tier needs level 10).
+        let available = PlayerProgressionService.availableBets(gameBets: gameBets, level: 9, betTierStartIndex: 3)
+        #expect(available == [10, 25, 50, 100])
     }
 
     @Test func aPlayerCannotSelectABetAboveTheirLimit() {
-        let gameBets: [Int64] = [10, 25, 50, 100, 250, 500]
-        let available = PlayerProgressionService.availableBets(gameBets: gameBets, level: 7)
-        #expect(!available.contains(500))
+        let gameBets: [Int64] = [10, 25, 50, 100, 250]
+        let available = PlayerProgressionService.availableBets(gameBets: gameBets, level: 9, betTierStartIndex: 3)
+        #expect(!available.contains(250))
     }
 
-    @Test func unlockLevelReportsTheTierThatIntroducesABet() {
-        #expect(PlayerProgressionService.unlockLevel(forBet: 500) == 10)
-        #expect(PlayerProgressionService.unlockLevel(forBet: 10_000) == 30)
-        #expect(PlayerProgressionService.unlockLevel(forBet: 999_999) == nil) // no tier ever unlocks this
+    @Test func unlockLevelReportsTheStepThatIntroducesABet() {
+        #expect(PlayerProgressionService.unlockLevel(forBet: 250, betTierStartIndex: 3) == 10)
+        #expect(PlayerProgressionService.unlockLevel(forBet: 1_000, betTierStartIndex: 3) == 30)
+    }
+
+    @Test func unlockLevelForTheGamesOwnLevelOneStakeIsLevelOne() {
+        #expect(PlayerProgressionService.unlockLevel(forBet: 100, betTierStartIndex: 3) == 1)
+    }
+
+    @Test func unlockLevelReturnsNilWhenNoStepEverReachesTheBet() {
+        #expect(PlayerProgressionService.unlockLevel(forBet: 999_999_999, betTierStartIndex: 3) == nil)
     }
 
     // MARK: - Win multiplier

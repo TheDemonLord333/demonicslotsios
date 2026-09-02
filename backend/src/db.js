@@ -34,9 +34,10 @@ function tableExists(table) {
 // fresh-install case via IF NOT EXISTS). The old table is kept around as
 // `players_pre_id_migration` rather than dropped, as a safety net.
 //
-// The freshly created table already carries `level`/`win_chance_multiplier`
-// (see migration 2 below) so a database that predates *both* features jumps
-// straight to the final shape in one hop instead of two.
+// The freshly created table already carries `level`/`win_chance_multiplier`/
+// `guaranteed_jackpot` (see migrations 2-3 below) so a database that
+// predates all of these features jumps straight to the final shape in one
+// hop instead of several.
 if (tableExists("players") && !columnExists("players", "id")) {
   const legacyRows = db.prepare("SELECT * FROM players").all();
 
@@ -51,25 +52,28 @@ if (tableExists("players") && !columnExists("players", "id")) {
       admin_revision         INTEGER NOT NULL DEFAULT 0,         -- bumped ONLY by an admin edit to coin_balance; drives conflict resolution
       level                  INTEGER NOT NULL DEFAULT 1,         -- server-authoritative player progression, 1-100
       win_chance_multiplier  REAL NOT NULL DEFAULT 1.0,          -- server-authoritative, 0.10-2.00, 1.0 = no bonus/penalty
+      guaranteed_jackpot     INTEGER NOT NULL DEFAULT 0,         -- admin-only "always win" override, 0/1
       created_at             TEXT NOT NULL,
       updated_at             TEXT NOT NULL
     );
   `);
 
   const insertMigratedRow = db.prepare(`
-    INSERT INTO players (id, username, display_name, device_token, coin_balance, admin_revision, level, win_chance_multiplier, created_at, updated_at)
-    VALUES (@id, @username, @display_name, @device_token, @coin_balance, @admin_revision, @level, @win_chance_multiplier, @created_at, @updated_at)
+    INSERT INTO players (id, username, display_name, device_token, coin_balance, admin_revision, level, win_chance_multiplier, guaranteed_jackpot, created_at, updated_at)
+    VALUES (@id, @username, @display_name, @device_token, @coin_balance, @admin_revision, @level, @win_chance_multiplier, @guaranteed_jackpot, @created_at, @updated_at)
   `);
   const migrateAll = db.transaction((rows) => {
     for (const row of rows) {
       insertMigratedRow.run({
         ...row,
         id: crypto.randomUUID(),
-        // A legacy pre-id row also predates level/win_chance_multiplier
-        // (they were added after this migration originally shipped) - give
-        // it the same neutral defaults a brand-new player gets.
+        // A legacy pre-id row also predates level/win_chance_multiplier/
+        // guaranteed_jackpot (they were added after this migration
+        // originally shipped) - give it the same neutral defaults a
+        // brand-new player gets.
         level: row.level ?? 1,
         win_chance_multiplier: row.win_chance_multiplier ?? 1.0,
+        guaranteed_jackpot: row.guaranteed_jackpot ?? 0,
       });
     }
   });
@@ -91,6 +95,7 @@ db.exec(`
     admin_revision         INTEGER NOT NULL DEFAULT 0,
     level                  INTEGER NOT NULL DEFAULT 1,
     win_chance_multiplier  REAL NOT NULL DEFAULT 1.0,
+    guaranteed_jackpot     INTEGER NOT NULL DEFAULT 0,
     created_at             TEXT NOT NULL,
     updated_at             TEXT NOT NULL
   );
@@ -107,6 +112,16 @@ if (!columnExists("players", "level")) {
 }
 if (!columnExists("players", "win_chance_multiplier")) {
   db.exec("ALTER TABLE players ADD COLUMN win_chance_multiplier REAL NOT NULL DEFAULT 1.0");
+}
+
+// --- Migration 3: add guaranteed_jackpot ----------------------------------
+// The admin "garantierter Jackpot" mode: an on/off switch, settable only
+// from the admin app, that forces every spin/climb to land the best
+// possible outcome on the device. Stored as INTEGER 0/1 (SQLite has no
+// native boolean) and serialized to/from a real JSON boolean at the API
+// boundary - see routes/admin.js and routes/players.js.
+if (!columnExists("players", "guaranteed_jackpot")) {
+  db.exec("ALTER TABLE players ADD COLUMN guaranteed_jackpot INTEGER NOT NULL DEFAULT 0");
 }
 
 /** Canonical uniqueness key: usernames only collide case-insensitively. */
@@ -165,18 +180,24 @@ function setBalanceFromClient(id, coinBalance) {
 
 /**
  * The one write path for everything an admin is allowed to change
- * directly: username, coin balance, level, and/or win_chance_multiplier -
- * any non-empty subset, addressed by the player's stable `id` (never by
- * username, which is just a mutable label). `admin_revision` only bumps
- * when `coinBalance` is part of the update: it exists purely to tell a
- * syncing device "your pending local balance is stale, an admin changed it
- * directly" - a username/level/multiplier edit doesn't touch the balance at
- * all, so it must never trigger that conflict-resolution path (the client
- * picks up a changed username/level/multiplier on its very next `/sync`
- * regardless, no revision bump needed for those).
+ * directly: username, coin balance, level, win_chance_multiplier, and/or
+ * guaranteed_jackpot - any non-empty subset, addressed by the player's
+ * stable `id` (never by username, which is just a mutable label).
+ * `admin_revision` only bumps when `coinBalance` is part of the update: it
+ * exists purely to tell a syncing device "your pending local balance is
+ * stale, an admin changed it directly" - none of the other fields touch the
+ * balance at all, so they must never trigger that conflict-resolution path
+ * (the client picks up a changed username/level/multiplier/jackpot flag on
+ * its very next `/sync` regardless, no revision bump needed for those).
  */
-function updatePlayerFields(id, { username, coinBalance, level, winChanceMultiplier } = {}) {
-  if (username === undefined && coinBalance === undefined && level === undefined && winChanceMultiplier === undefined) {
+function updatePlayerFields(id, { username, coinBalance, level, winChanceMultiplier, guaranteedJackpot } = {}) {
+  if (
+    username === undefined &&
+    coinBalance === undefined &&
+    level === undefined &&
+    winChanceMultiplier === undefined &&
+    guaranteedJackpot === undefined
+  ) {
     return findById(id);
   }
 
@@ -199,6 +220,10 @@ function updatePlayerFields(id, { username, coinBalance, level, winChanceMultipl
   if (winChanceMultiplier !== undefined) {
     assignments.push("win_chance_multiplier = @winChanceMultiplier");
     params.winChanceMultiplier = winChanceMultiplier;
+  }
+  if (guaranteedJackpot !== undefined) {
+    assignments.push("guaranteed_jackpot = @guaranteedJackpot");
+    params.guaranteedJackpot = guaranteedJackpot ? 1 : 0;
   }
 
   db.prepare(`UPDATE players SET ${assignments.join(", ")} WHERE id = @id`).run(params);

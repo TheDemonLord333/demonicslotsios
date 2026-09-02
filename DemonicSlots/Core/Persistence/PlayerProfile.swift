@@ -60,6 +60,12 @@ final class PlayerProfile {
     // created before this field existed.
     var level: Int64 = 1
     var winChanceMultiplier: Double = 1.0
+    /// The admin "garantierter Jackpot"-Modus - same server-authoritative,
+    /// admin-app-only treatment as `level`/`winChanceMultiplier` (see
+    /// `GameProbabilityContext.guaranteesJackpot`'s doc comment for what it
+    /// actually does in-game). `= false` here for the same lightweight-
+    /// migration reason as `level`'s comment above.
+    var hasGuaranteedJackpot: Bool = false
 
     /// Cumulative XP earned by wagering, purely client-side (see
     /// `WalletService.awardXP`/`PlayerProgressionService`). Unlike `level`
@@ -90,6 +96,7 @@ final class PlayerProfile {
         lastSyncedAt: Date? = nil,
         level: Int64 = 1,
         winChanceMultiplier: Double = 1.0,
+        hasGuaranteedJackpot: Bool = false,
         totalXP: Int64 = 0
     ) {
         self.profileID = profileID
@@ -103,6 +110,7 @@ final class PlayerProfile {
         self.lastSyncedAt = lastSyncedAt
         self.level = level
         self.winChanceMultiplier = winChanceMultiplier
+        self.hasGuaranteedJackpot = hasGuaranteedJackpot
         self.totalXP = totalXP
     }
 

@@ -40,13 +40,15 @@ function serializePlayer(player) {
     username: player.display_name,
     coinBalance: player.coin_balance,
     adminRevision: player.admin_revision,
-    // Server-authoritative player progression: the app only ever reads
-    // these (register/sync), it never writes them - only the admin API
-    // (see routes/admin.js) can change them. Always sent so a syncing
-    // device stays current even when nothing about the coin balance
-    // changed (no admin_revision bump needed for a level/multiplier edit).
+    // Server-authoritative player progression/admin overrides: the app
+    // only ever reads these (register/sync), it never writes them - only
+    // the admin API (see routes/admin.js) can change them. Always sent so
+    // a syncing device stays current even when nothing about the coin
+    // balance changed (no admin_revision bump needed for a level/
+    // multiplier/guaranteedJackpot edit).
     level: player.level,
     winChanceMultiplier: player.win_chance_multiplier,
+    guaranteedJackpot: !!player.guaranteed_jackpot,
     updatedAt: player.updated_at,
   };
 }

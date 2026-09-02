@@ -89,28 +89,46 @@ final class RiskLadderSessionController {
     var canRisk: Bool { state == .ready }
     var canCashOut: Bool { state == .ready && currentLevel > 0 }
 
-    /// This player's current level/win-chance multiplier - same source and
-    /// same reasoning as `SpinSessionController.progressionInputs`.
-    private var progressionInputs: (level: Int, playerMultiplier: Double) {
+    /// This player's current level/win-chance multiplier/admin jackpot flag
+    /// - same source and same reasoning as
+    /// `SpinSessionController.progressionInputs`.
+    private var progressionInputs: (level: Int, playerMultiplier: Double, guaranteesJackpot: Bool) {
         let profile = wallet.currentProfile()
-        return (Int(profile.level), profile.winChanceMultiplier)
+        return (Int(profile.level), profile.winChanceMultiplier, profile.hasGuaranteedJackpot)
     }
 
     /// The win-chance context this player currently has, applied to each
     /// climb attempt's base probability - see `RiskLadderEngine.attemptClimb`.
     var probabilityContext: GameProbabilityContext {
         let inputs = progressionInputs
-        return PlayerProgressionService.probabilityContext(level: inputs.level, playerMultiplier: inputs.playerMultiplier)
+        return PlayerProgressionService.probabilityContext(
+            level: inputs.level,
+            playerMultiplier: inputs.playerMultiplier,
+            guaranteesJackpot: inputs.guaranteesJackpot
+        )
     }
 
     /// This game's own stakes, filtered down to what the player's current
-    /// level actually unlocks - reuses the exact same global bet-tier logic
-    /// the slot uses, per the task's explicit "no second special-case
-    /// solution" ask.
+    /// level actually unlocks - reuses the exact same shared stake-ladder
+    /// logic the slot uses, per the task's explicit "no second
+    /// special-case solution" ask, just with this game's own
+    /// `betTierStartIndex`.
+    ///
+    /// Compares `definition.totalBet(betPerLine:)`, not bare `perLine` -
+    /// see `SpinSessionController.availableBetLevels`'s doc comment for
+    /// why. A no-op here specifically (Demonic Risk Ladder's definition has
+    /// exactly one placeholder payline, so `totalBet(betPerLine:) ==
+    /// betPerLine` always), but using the same formula both places means
+    /// this stays correct even if that ever changed, with nothing to
+    /// remember to update.
     var availableStakeLevels: [BetLevel] {
-        let gameMaximumBet = definition.betLevels.map(\.perLine).max() ?? 0
-        let limit = PlayerProgressionService.effectiveMaxBet(level: progressionInputs.level, gameMaximumBet: gameMaximumBet)
-        return definition.betLevels.filter { $0.perLine <= limit }
+        let gameMaximumBet = definition.betLevels.map { definition.totalBet(betPerLine: $0.perLine) }.max() ?? 0
+        let limit = PlayerProgressionService.effectiveMaxBet(
+            level: progressionInputs.level,
+            gameMaximumBet: gameMaximumBet,
+            betTierStartIndex: definition.betTierStartIndex
+        )
+        return definition.betLevels.filter { definition.totalBet(betPerLine: $0.perLine) <= limit }
     }
 
     /// Stakes this game supports but the player's level doesn't unlock yet,
@@ -119,7 +137,15 @@ final class RiskLadderSessionController {
         let unlocked = Set(availableStakeLevels.map(\.perLine))
         return definition.betLevels
             .filter { !unlocked.contains($0.perLine) }
-            .map { ($0, PlayerProgressionService.unlockLevel(forBet: $0.perLine)) }
+            .map {
+                (
+                    $0,
+                    PlayerProgressionService.unlockLevel(
+                        forBet: definition.totalBet(betPerLine: $0.perLine),
+                        betTierStartIndex: definition.betTierStartIndex
+                    )
+                )
+            }
     }
 
     /// The multiplier for the rung currently stood on (`0` while at START).

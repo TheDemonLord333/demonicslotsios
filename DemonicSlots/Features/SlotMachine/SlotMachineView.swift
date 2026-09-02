@@ -267,32 +267,64 @@ private struct SlotMachineContentView: View {
         .background(DemonicPalette.glowingViolet.opacity(0.15), in: Capsule())
     }
 
+    /// Tap = one spin (unless autospin is already on, where a tap instead
+    /// cancels it - the "einfaches Antippen" the task asked for). Hold =
+    /// engage autospin. Deliberately not a plain `Button`: layering a
+    /// long-press *and* a distinguishable quick tap on the same control
+    /// needs `onLongPressGesture` (hold) plus a `.simultaneousGesture`
+    /// `TapGesture` (quick tap) rather than a single `Button.action`, which
+    /// only ever sees a tap.
     private var spinButton: some View {
-        Button(action: performSpin) {
-            ZStack {
-                Circle()
-                    .fill(
-                        RadialGradient(
-                            colors: [DemonicPalette.emberOrange, DemonicPalette.hellfireRed],
-                            center: .center, startRadius: 4, endRadius: 60
-                        )
+        ZStack {
+            Circle()
+                .fill(
+                    RadialGradient(
+                        colors: controller.isAutoSpinning
+                            ? [DemonicPalette.glowingViolet, DemonicPalette.hellfireRed]
+                            : [DemonicPalette.emberOrange, DemonicPalette.hellfireRed],
+                        center: .center, startRadius: 4, endRadius: 60
                     )
-                    .overlay(Circle().strokeBorder(DemonicPalette.boneIvory.opacity(0.6), lineWidth: 2))
-                if controller.state == .spinning || controller.state == .stopping || controller.state == .preparing {
-                    ProgressView().tint(.white)
-                } else {
-                    Text(controller.isInBonusRound ? "FREISPIEL" : "SPIN")
-                        .font(.headline.weight(.heavy))
-                        .foregroundStyle(.white)
-                }
+                )
+                .overlay(
+                    Circle().strokeBorder(
+                        controller.isAutoSpinning ? DemonicPalette.glowingViolet : DemonicPalette.boneIvory.opacity(0.6),
+                        lineWidth: controller.isAutoSpinning ? 3 : 2
+                    )
+                )
+                .shadow(color: controller.isAutoSpinning ? DemonicPalette.glowingViolet.opacity(0.7) : .clear, radius: 10)
+            if controller.state == .spinning || controller.state == .stopping || controller.state == .preparing {
+                ProgressView().tint(.white)
+            } else {
+                Text(controller.isInBonusRound ? "FREISPIEL" : (controller.isAutoSpinning ? "AUTO" : "SPIN"))
+                    .font(.headline.weight(.heavy))
+                    .foregroundStyle(.white)
             }
-            .frame(width: 88, height: 88)
         }
-        .disabled(!controller.canSpin)
+        .frame(width: 88, height: 88)
+        .contentShape(Circle())
         .opacity(controller.canSpin ? 1 : 0.6)
         .frame(maxWidth: .infinity)
-        .accessibilityLabel(controller.isInBonusRound ? "Freispiel starten" : "Drehen")
-        .accessibilityHint("Setzt \(controller.totalBet) Soul Coins ein und dreht die Walzen")
+        .onLongPressGesture(minimumDuration: 0.45) {
+            guard controller.canSpin, !controller.isAutoSpinning else { return }
+            hapticsService?.selection()
+            controller.toggleAutoSpin()
+        }
+        .simultaneousGesture(
+            TapGesture().onEnded {
+                if controller.isAutoSpinning {
+                    controller.toggleAutoSpin()
+                } else {
+                    performSpin()
+                }
+            }
+        )
+        .accessibilityAddTraits(.isButton)
+        .accessibilityLabel(controller.isAutoSpinning ? "Autospin aktiv" : (controller.isInBonusRound ? "Freispiel starten" : "Drehen"))
+        .accessibilityHint(
+            controller.isAutoSpinning
+                ? "Antippen, um Autospin zu beenden"
+                : "Setzt \(controller.totalBet) Soul Coins ein und dreht die Walzen. Gedrückt halten für Autospin."
+        )
     }
 
     private var footerButtons: some View {

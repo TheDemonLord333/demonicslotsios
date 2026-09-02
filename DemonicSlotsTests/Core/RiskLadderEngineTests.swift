@@ -66,6 +66,24 @@ struct RiskLadderEngineTests {
         #expect(abs(observedRate - 0.935) < 0.02)
     }
 
+    @Test func guaranteedJackpotModeAlwaysSucceedsRegardlessOfTheRoll() {
+        // A roll value that would fail every rung's real probability -
+        // guaranteesJackpot must still short-circuit to success before the
+        // roll is even consulted.
+        var random: any RandomNumberSource = ScriptedRandomSource(values: [999_999])
+        let context = GameProbabilityContext(finalWinMultiplier: 1.0, guaranteesJackpot: true)
+        for level in 0..<levels.count {
+            #expect(RiskLadderEngine.attemptClimb(fromLevel: level, configuration: levels, probabilityContext: context, randomSource: &random))
+        }
+    }
+
+    @Test func guaranteedJackpotModeStillRefusesAnOutOfRangeLevel() {
+        // The bypass must not skip the level-range guard.
+        var random: any RandomNumberSource = ScriptedRandomSource(values: [0])
+        let context = GameProbabilityContext(finalWinMultiplier: 1.0, guaranteesJackpot: true)
+        #expect(!RiskLadderEngine.attemptClimb(fromLevel: levels.count, configuration: levels, probabilityContext: context, randomSource: &random))
+    }
+
     @Test func repeatedSimulationLandsWithinAWideBandOfTheConfiguredProbability() {
         var random: any RandomNumberSource = SeededRandomSource(seed: 42)
         let trials = 20_000

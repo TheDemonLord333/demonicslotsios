@@ -57,7 +57,8 @@ nonisolated enum RiskLadderDefinition {
             cardAssetKey: "riskLadder.card",
             audioKeys: SlotAudioKeys(reelStop: "", spinLoop: "", lineWin: "", bigWin: "", scatterHit: "", bonusEnter: "", background: ""),
             animationKeys: SlotAnimationKeys(smokeParticle: "", emberParticle: "", winParticle: "", riftTransition: ""),
-            kind: .riskLadder
+            kind: .riskLadder,
+            betTierStartIndex: RiskLadderConfiguration.betTierStartIndex
         )
     }
 }

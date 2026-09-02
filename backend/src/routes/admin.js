@@ -32,6 +32,7 @@ function serializePlayer(player) {
     adminRevision: player.admin_revision,
     level: player.level,
     winChanceMultiplier: player.win_chance_multiplier,
+    guaranteedJackpot: !!player.guaranteed_jackpot,
     createdAt: player.created_at,
     updatedAt: player.updated_at,
   };
@@ -58,10 +59,14 @@ function isValidWinChanceMultiplier(value) {
   );
 }
 
+function isValidGuaranteedJackpot(value) {
+  return typeof value === "boolean";
+}
+
 /** GET /api/admin/players - list every registered player. Each entry
  * carries its stable `id` - use that (not `username`) to address a
  * specific player in the endpoint below, since username is just a mutable
- * label. Also carries `level`/`winChanceMultiplier`. */
+ * label. Also carries `level`/`winChanceMultiplier`/`guaranteedJackpot`. */
 router.get("/players", (_req, res) => {
   res.json(listAllPlayers().map(serializePlayer));
 });
@@ -77,7 +82,7 @@ router.get("/players/:id", (req, res) => {
 
 /**
  * PATCH /api/admin/players/:id
- * body: any non-empty subset of { username, balance, level, winChanceMultiplier }
+ * body: any non-empty subset of { username, balance, level, winChanceMultiplier, guaranteedJackpot }
  *
  * The one endpoint your admin tool needs for every direct override: send
  * only the field(s) you're actually changing, addressed by the player's
@@ -87,9 +92,13 @@ router.get("/players/:id", (req, res) => {
  * validation, nothing is written at all. Setting `balance` always
  * increments `admin_revision`, which is what makes the app treat that
  * change as authoritative over anything that happened offline on the
- * player's device; `username`/`level`/`winChanceMultiplier` don't touch
- * admin_revision at all - the app only ever reads them, so it just picks
- * up the new value on its next sync, no conflict to resolve.
+ * player's device; `username`/`level`/`winChanceMultiplier`/
+ * `guaranteedJackpot` don't touch admin_revision at all - the app only
+ * ever reads them, so it just picks up the new value on its next sync, no
+ * conflict to resolve. `guaranteedJackpot` is the admin-only "always win"
+ * override: while `true`, every spin/climb on that player's device lands
+ * the best possible outcome outright (see GameProbabilityContext.
+ * guaranteesJackpot on the iOS side).
  */
 router.patch("/players/:id", (req, res) => {
   const player = findById(req.params.id);
@@ -97,8 +106,14 @@ router.patch("/players/:id", (req, res) => {
     return res.status(404).json({ error: "not_found" });
   }
 
-  const { username, balance, level, winChanceMultiplier } = req.body ?? {};
-  if (username === undefined && balance === undefined && level === undefined && winChanceMultiplier === undefined) {
+  const { username, balance, level, winChanceMultiplier, guaranteedJackpot } = req.body ?? {};
+  if (
+    username === undefined &&
+    balance === undefined &&
+    level === undefined &&
+    winChanceMultiplier === undefined &&
+    guaranteedJackpot === undefined
+  ) {
     return res.status(400).json({ error: "no_fields_to_update" });
   }
 
@@ -126,8 +141,17 @@ router.patch("/players/:id", (req, res) => {
       allowedRange: [MIN_WIN_CHANCE_MULTIPLIER, MAX_WIN_CHANCE_MULTIPLIER],
     });
   }
+  if (guaranteedJackpot !== undefined && !isValidGuaranteedJackpot(guaranteedJackpot)) {
+    return res.status(400).json({ error: "invalid_guaranteed_jackpot" });
+  }
 
-  const updated = updatePlayerFields(player.id, { username, coinBalance: balance, level, winChanceMultiplier });
+  const updated = updatePlayerFields(player.id, {
+    username,
+    coinBalance: balance,
+    level,
+    winChanceMultiplier,
+    guaranteedJackpot,
+  });
   res.json(serializePlayer(updated));
 });
 
