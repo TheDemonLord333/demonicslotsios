@@ -3,14 +3,14 @@
 //  DemonicSlots
 //
 //  Single source of truth for every level-driven number in the app: the
-//  per-level win-chance bonus and the bet-tier milestones that unlock a
-//  higher global max bet. `PlayerProgressionService` is the only code that
-//  reads this table - no view or game engine ever branches on `player.level`
-//  directly (see that service's header comment for why).
+//  per-level win-chance bonus and the shared stake ladder every game's own
+//  bet-tier progression is a slice of. `PlayerProgressionService` is the
+//  only code that reads this table - no view or game engine ever branches
+//  on `player.level` directly (see that service's header comment for why).
 //
 //  Balancing note: this is a starting configuration ("erste Balancing-
 //  Vorgabe"), not a measured result - same caveat as Infernal Forge's reel
-//  weights and Risk Ladder's level odds. Retune by editing the arrays below;
+//  weights and Risk Ladder's level odds. Retune by editing the values below;
 //  nothing else needs to change.
 //
 import Foundation
@@ -53,18 +53,14 @@ nonisolated enum PlayerLevelConfiguration {
         PlayerLevelDefinition(level: 10, winMultiplier: 1.07),
     ]
 
-    /// Bet-tier milestones. The global max bet only changes at one of these
-    /// levels and stays flat in between (e.g. levels 11-14 keep level 10's
-    /// 500-coin limit) - deliberately a separate table from `levels` above,
-    /// per the task that introduced this, so new tiers can be added without
-    /// touching the win-bonus table or any game engine.
-    static let betTiers: [BetTier] = [
-        BetTier(minimumLevel: 1, maxBet: 100),
-        BetTier(minimumLevel: 5, maxBet: 250),
-        BetTier(minimumLevel: 10, maxBet: 500),
-        BetTier(minimumLevel: 15, maxBet: 1_000),
-        BetTier(minimumLevel: 20, maxBet: 2_500),
-        BetTier(minimumLevel: 25, maxBet: 5_000),
-        BetTier(minimumLevel: 30, maxBet: 10_000),
-    ]
+    /// Every `levelsPerBetTierStep` levels, a game's max bet advances one
+    /// step up the shared stake ladder (see `PlayerProgressionService.
+    /// stakeSequenceValue(atIndex:)`) - flat in between, same "milestone,
+    /// not a ramp" shape the old single global bet-tier table had. Level 1
+    /// itself is a game's own starting point in that ladder (its
+    /// `betTierStartIndex`, see `SlotGameDefinition`), never level 0 - so
+    /// every player, even freshly registered, already has *a* max bet, and
+    /// the first actual step up lands at level `levelsPerBetTierStep`
+    /// itself (10 in this starting configuration), not one level later.
+    static let levelsPerBetTierStep = 10
 }

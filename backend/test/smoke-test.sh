@@ -64,9 +64,10 @@ print(matches[0] if matches else '')
 " < /tmp/smoke_players.json)
 [ -n "$PLAYER_ID" ] && pass "found id for $USERNAME" || fail "found id for $USERNAME"
 
-echo "== new player defaults to level 1, winChanceMultiplier 1.0 =="
+echo "== new player defaults to level 1, winChanceMultiplier 1.0, guaranteedJackpot false =="
 expect_field "default level is 1" "1" "$(json_field level < /tmp/smoke_resp.json)"
 expect_field "default winChanceMultiplier is 1.0" "1" "$(json_field winChanceMultiplier < /tmp/smoke_resp.json)"
+expect_field "default guaranteedJackpot is false" "False" "$(json_field guaranteedJackpot < /tmp/smoke_resp.json)"
 
 echo "== duplicate username (different casing) is rejected =="
 STATUS=$(curl -s -o /tmp/smoke_resp.json -w "%{http_code}" -X POST "$BASE_URL/api/players/register" \
@@ -81,24 +82,34 @@ expect_status "sync request" 200 "$STATUS"
 expect_field "resolution is client_applied" "client_applied" "$(json_field resolution < /tmp/smoke_resp.json)"
 expect_field "balance reflects local play" "4200" "$(json_field coinBalance < /tmp/smoke_resp.json)"
 
-echo "== admin can set level and winChanceMultiplier without touching admin_revision =="
+echo "== admin can set level, winChanceMultiplier and guaranteedJackpot without touching admin_revision =="
 REVISION_BEFORE=$(json_field adminRevision < /tmp/smoke_resp.json)
 STATUS=$(curl -s -o /tmp/smoke_resp.json -w "%{http_code}" -X PATCH "$BASE_URL/api/admin/players/$PLAYER_ID" \
   -H "Authorization: Bearer $ADMIN_TOKEN" -H "Content-Type: application/json" \
-  -d '{"level":12,"winChanceMultiplier":1.08}')
-expect_status "admin level/multiplier update" 200 "$STATUS"
+  -d '{"level":12,"winChanceMultiplier":1.08,"guaranteedJackpot":true}')
+expect_status "admin level/multiplier/jackpot update" 200 "$STATUS"
 expect_field "level updated" "12" "$(json_field level < /tmp/smoke_resp.json)"
 expect_field "winChanceMultiplier updated" "1.08" "$(json_field winChanceMultiplier < /tmp/smoke_resp.json)"
-expect_field "admin_revision unchanged by a level/multiplier-only edit" "$REVISION_BEFORE" "$(json_field adminRevision < /tmp/smoke_resp.json)"
+expect_field "guaranteedJackpot updated" "True" "$(json_field guaranteedJackpot < /tmp/smoke_resp.json)"
+expect_field "admin_revision unchanged by a level/multiplier/jackpot-only edit" "$REVISION_BEFORE" "$(json_field adminRevision < /tmp/smoke_resp.json)"
 
-echo "== the next sync reflects the admin-set level/multiplier without a server_wins conflict =="
+echo "== the next sync reflects the admin-set level/multiplier/jackpot without a server_wins conflict =="
 STATUS=$(curl -s -o /tmp/smoke_resp.json -w "%{http_code}" -X POST "$BASE_URL/api/players/sync" \
   -H "Content-Type: application/json" \
   -d "{\"username\":\"$USERNAME\",\"deviceToken\":\"$DEVICE_TOKEN\",\"localBalance\":4200,\"lastKnownAdminRevision\":$REVISION_BEFORE}")
-expect_status "sync after level/multiplier edit" 200 "$STATUS"
+expect_status "sync after level/multiplier/jackpot edit" 200 "$STATUS"
 expect_field "resolution is still client_applied" "client_applied" "$(json_field resolution < /tmp/smoke_resp.json)"
 expect_field "sync carries the new level" "12" "$(json_field level < /tmp/smoke_resp.json)"
 expect_field "sync carries the new winChanceMultiplier" "1.08" "$(json_field winChanceMultiplier < /tmp/smoke_resp.json)"
+expect_field "sync carries the new guaranteedJackpot" "True" "$(json_field guaranteedJackpot < /tmp/smoke_resp.json)"
+
+echo "== admin can turn guaranteedJackpot back off again =="
+STATUS=$(curl -s -o /tmp/smoke_resp.json -w "%{http_code}" -X PATCH "$BASE_URL/api/admin/players/$PLAYER_ID" \
+  -H "Authorization: Bearer $ADMIN_TOKEN" -H "Content-Type: application/json" \
+  -d '{"guaranteedJackpot":false}')
+expect_status "admin jackpot disable" 200 "$STATUS"
+expect_field "guaranteedJackpot disabled" "False" "$(json_field guaranteedJackpot < /tmp/smoke_resp.json)"
+expect_field "admin_revision still unchanged by a jackpot-only edit" "$REVISION_BEFORE" "$(json_field adminRevision < /tmp/smoke_resp.json)"
 
 echo "== a client-claimed earnedLevel raises the stored level, but never lowers it =="
 STATUS=$(curl -s -o /tmp/smoke_resp.json -w "%{http_code}" -X POST "$BASE_URL/api/players/sync" \
@@ -117,13 +128,16 @@ STATUS=$(curl -s -o /tmp/smoke_resp.json -w "%{http_code}" -X POST "$BASE_URL/ap
 expect_status "sync with an out-of-range earnedLevel is not an error" 200 "$STATUS"
 expect_field "out-of-range claim is ignored, not applied" "40" "$(json_field level < /tmp/smoke_resp.json)"
 
-echo "== invalid level/winChanceMultiplier are rejected, not silently clamped =="
+echo "== invalid level/winChanceMultiplier/guaranteedJackpot are rejected, not silently clamped/coerced =="
 STATUS=$(curl -s -o /dev/null -w "%{http_code}" -X PATCH "$BASE_URL/api/admin/players/$PLAYER_ID" \
   -H "Authorization: Bearer $ADMIN_TOKEN" -H "Content-Type: application/json" -d '{"level":-500}')
 expect_status "negative level rejected" 400 "$STATUS"
 STATUS=$(curl -s -o /dev/null -w "%{http_code}" -X PATCH "$BASE_URL/api/admin/players/$PLAYER_ID" \
   -H "Authorization: Bearer $ADMIN_TOKEN" -H "Content-Type: application/json" -d '{"winChanceMultiplier":99999}')
 expect_status "absurd multiplier rejected" 400 "$STATUS"
+STATUS=$(curl -s -o /dev/null -w "%{http_code}" -X PATCH "$BASE_URL/api/admin/players/$PLAYER_ID" \
+  -H "Authorization: Bearer $ADMIN_TOKEN" -H "Content-Type: application/json" -d '{"guaranteedJackpot":"yes"}')
+expect_status "non-boolean guaranteedJackpot rejected" 400 "$STATUS"
 
 echo "== admin can rename a player by id; renaming to a taken name is rejected =="
 RENAMED_USERNAME="Renamed${RANDOM_SUFFIX}"

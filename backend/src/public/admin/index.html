@@ -98,13 +98,14 @@
           <th>Guthaben</th>
           <th>Level</th>
           <th>Win-Multiplier</th>
+          <th>Jackpot</th>
           <th>Admin-Revision</th>
           <th>Zuletzt geändert</th>
           <th></th>
         </tr>
       </thead>
       <tbody id="playersBody">
-        <tr><td colspan="7" class="muted">Noch keine Daten geladen.</td></tr>
+        <tr><td colspan="8" class="muted">Noch keine Daten geladen.</td></tr>
       </tbody>
     </table>
   </div>
@@ -149,7 +150,7 @@
 
   function renderPlayers(players) {
     if (!players.length) {
-      playersBody.innerHTML = '<tr><td colspan="7" class="muted">Noch keine Spieler registriert.</td></tr>';
+      playersBody.innerHTML = '<tr><td colspan="8" class="muted">Noch keine Spieler registriert.</td></tr>';
       return;
     }
     playersBody.innerHTML = "";
@@ -193,6 +194,13 @@
       multiplierInput.value = player.winChanceMultiplier;
       multiplierTd.appendChild(multiplierInput);
 
+      const jackpotTd = document.createElement("td");
+      const jackpotInput = document.createElement("input");
+      jackpotInput.type = "checkbox";
+      jackpotInput.checked = !!player.guaranteedJackpot;
+      jackpotInput.title = "Garantierter Jackpot: jeder Spin/Klettern-Versuch gewinnt immer.";
+      jackpotTd.appendChild(jackpotInput);
+
       const revisionTd = document.createElement("td");
       revisionTd.textContent = player.adminRevision;
 
@@ -214,12 +222,14 @@
       let knownBalance = player.coinBalance;
       let knownLevel = player.level;
       let knownMultiplier = player.winChanceMultiplier;
+      let knownJackpot = !!player.guaranteedJackpot;
 
       saveButton.addEventListener("click", async () => {
         const newName = nameInput.value.trim();
         const newBalance = Number(balanceInput.value);
         const newLevel = Number(levelInput.value);
         const newMultiplier = Number(multiplierInput.value);
+        const newJackpot = jackpotInput.checked;
         if (!/^[A-Za-z0-9_]{3,20}$/.test(newName)) {
           setStatus(rowStatus, "Username muss 3-20 Zeichen sein (Buchstaben, Zahlen, _).", true);
           return;
@@ -242,6 +252,7 @@
         if (newBalance !== knownBalance) body.balance = newBalance;
         if (newLevel !== knownLevel) body.level = newLevel;
         if (newMultiplier !== knownMultiplier) body.winChanceMultiplier = newMultiplier;
+        if (newJackpot !== knownJackpot) body.guaranteedJackpot = newJackpot;
         if (Object.keys(body).length === 0) {
           setStatus(rowStatus, "Keine Änderung.", false);
           return;
@@ -261,10 +272,12 @@
           knownBalance = updated.coinBalance;
           knownLevel = updated.level;
           knownMultiplier = updated.winChanceMultiplier;
+          knownJackpot = !!updated.guaranteedJackpot;
           nameInput.value = updated.username;
           balanceInput.value = updated.coinBalance;
           levelInput.value = updated.level;
           multiplierInput.value = updated.winChanceMultiplier;
+          jackpotInput.checked = knownJackpot;
           revisionTd.textContent = updated.adminRevision;
           updatedTd.textContent = new Date(updated.updatedAt).toLocaleString("de-DE");
           setStatus(rowStatus, "Gespeichert.", false);
@@ -278,7 +291,7 @@
       actionTd.appendChild(saveButton);
       actionTd.appendChild(rowStatus);
 
-      tr.append(nameTd, balanceTd, levelTd, multiplierTd, revisionTd, updatedTd, actionTd);
+      tr.append(nameTd, balanceTd, levelTd, multiplierTd, jackpotTd, revisionTd, updatedTd, actionTd);
       playersBody.appendChild(tr);
     }
   }

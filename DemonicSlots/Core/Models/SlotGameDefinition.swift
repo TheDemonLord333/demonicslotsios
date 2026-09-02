@@ -33,6 +33,16 @@ nonisolated struct SlotGameDefinition: Codable, Equatable, Sendable, Identifiabl
     var paytable: [PaytableEntry]
     /// Selectable per-line stakes, ascending.
     var betLevels: [BetLevel]
+    /// This game's own starting point (level 1) in the shared stake ladder
+    /// (`PlayerProgressionService.stakeSequenceValue(atIndex:)`) - level 1
+    /// unlocks `stakeSequenceValue(atIndex: betTierStartIndex)`, and every
+    /// `PlayerLevelConfiguration.levelsPerBetTierStep` levels after that
+    /// unlocks the next value up the ladder. Defaults to `0` (the ladder's
+    /// very first value) so every pre-existing call site (`ComingSoonGames`
+    /// placeholders, which are unavailable and never actually spun) needs
+    /// no change - only `InfernalForgeDefinition`/`RiskLadderDefinition`
+    /// pass a real value.
+    var betTierStartIndex: Int
     var wildSymbolID: SymbolID?
     var scatterSymbolID: SymbolID?
     var freeSpinsRules: FreeSpinsRules?
@@ -59,13 +69,15 @@ nonisolated struct SlotGameDefinition: Codable, Equatable, Sendable, Identifiabl
         cardAssetKey: String,
         audioKeys: SlotAudioKeys,
         animationKeys: SlotAnimationKeys,
-        kind: CasinoGameKind = .slotMachine
+        kind: CasinoGameKind = .slotMachine,
+        betTierStartIndex: Int = 0
     ) {
         self.id = id
         self.displayName = displayName
         self.shortDescription = shortDescription
         self.availability = availability
         self.kind = kind
+        self.betTierStartIndex = betTierStartIndex
         self.theme = theme
         self.symbols = symbols
         self.reelStrips = reelStrips

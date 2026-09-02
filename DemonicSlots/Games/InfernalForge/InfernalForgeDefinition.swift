@@ -32,13 +32,29 @@ nonisolated enum InfernalForgeDefinition {
         Payline(id: 10, rowIndices: [0, 1, 1, 1, 0]),
     ]
 
-    static let betLevels: [BetLevel] = [
-        BetLevel(perLine: 1),
-        BetLevel(perLine: 2),
-        BetLevel(perLine: 5),
-        BetLevel(perLine: 10),
-        BetLevel(perLine: 25),
-    ]
+    /// Index 4 in the shared stake ladder (`PlayerProgressionService.
+    /// stakeSequenceValue(atIndex:)`) - 250 Soul Coins total bet
+    /// (`perLine: 25` × 10 paylines), the game's own long-standing top bet,
+    /// becomes the level-1 floor of its bet-tier progression. See
+    /// `betLevels`' comment for how the higher tiers are derived from this
+    /// same number.
+    static let betTierStartIndex = 4
+
+    /// The original 5 hand-picked bet levels, plus one more `perLine`
+    /// entry for every bet-tier step level 10, 20, ... `maximumLevel`
+    /// unlocks (see `PlayerLevelConfiguration.levelsPerBetTierStep`) -
+    /// computed from the shared stake ladder rather than hand-typed, so it
+    /// can never drift out of sync with what `betTierStartIndex` actually
+    /// promises. `/ 10` converts a ladder value (a *total* bet) back to
+    /// `perLine` for this game's 10 fixed paylines.
+    static let betLevels: [BetLevel] = {
+        let original: [Int64] = [1, 2, 5, 10, 25]
+        let tierStepCount = PlayerLevelConfiguration.maximumLevel / PlayerLevelConfiguration.levelsPerBetTierStep
+        let higherTiers = (1...tierStepCount).map { step in
+            PlayerProgressionService.stakeSequenceValue(atIndex: betTierStartIndex + step) / 10
+        }
+        return (original + higherTiers).map(BetLevel.init(perLine:))
+    }()
 
     static let paytable: [PaytableEntry] = [
         PaytableEntry(symbolID: InfernalForgeSymbols.emberSigil, payoutByMatchCount: [3: 2, 4: 5, 5: 10]),
@@ -108,7 +124,8 @@ nonisolated enum InfernalForgeDefinition {
             freeSpinsRules: freeSpinsRules,
             cardAssetKey: "infernalForge.card",
             audioKeys: audioKeys,
-            animationKeys: animationKeys
+            animationKeys: animationKeys,
+            betTierStartIndex: betTierStartIndex
         )
     }
 }

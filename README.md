@@ -157,18 +157,18 @@ ist die Startkonfiguration ein Ausgangswert, kein gemessenes Ergebnis;
 `SeededRandomSource`, hoher Stichprobenzahl) dass die beobachtete
 Erfolgsquote einer Stufe ungefähr der konfigurierten entspricht.
 
-## Player-Level, Win-Chance-Multiplikator & Bet-Tiers
+## Player-Level, Win-Chance-Multiplikator, Bet-Tiers & garantierter Jackpot
 
 Jeder Spieler hat zusätzlich zu Coins ein serverseitig verwaltetes `level`
-(1-100) und einen `winChanceMultiplier` (0.10-2.00) - siehe
-`backend/README.md`s "Player progression"-Abschnitt für die Backend-Seite
-(Schema, Migration, API, serverseitige Validierung). Diese zwei Werte
-beeinflussen zwei unabhängige Dinge, nie über verstreute
-`if player.level >= X`-Ketten, sondern ausschließlich über eine zentrale
-Stelle:
+(1-100), einen `winChanceMultiplier` (0.10-2.00) und ein
+`guaranteedJackpot`-Flag (bool) - siehe `backend/README.md`s "Player
+progression"-Abschnitt für die Backend-Seite (Schema, Migration, API,
+serverseitige Validierung). Diese drei Werte beeinflussen unabhängige
+Dinge, nie über verstreute `if player.level >= X`-Ketten, sondern
+ausschließlich über eine zentrale Stelle:
 
 ```
-PlayerProfile (level, winChanceMultiplier - vom Server synchronisiert)
+PlayerProfile (level, winChanceMultiplier, hasGuaranteedJackpot - vom Server synchronisiert)
   ↓
 PlayerProgressionService  (Core/Services/PlayerProgressionService.swift)
   ↓
@@ -204,23 +204,42 @@ SlotEngine / RiskLadderEngine
       `nextInt(0..<strip.count)`-Wurf - byte-identisches Verhalten zu vorher,
       siehe `ReelSpinner.swift`s Kopfkommentar und
       `ReelSpinnerTests.neutralProbabilityContextIsByteForByteIdenticalToTheOriginalRoll`.
-- **Einsatzlimits:** `PlayerLevelConfiguration.betTiers` (sparsame
-  Meilensteine, z. B. Level 10 → 500, unverändert bis Level 15 → 1.000) legt
-  das **globale** Max-Bet fest; `effectiveMaxBet = min(globalesMaxBet,
-  spielEigenesMaxBet)`. Jedes Spiel filtert seine eigene `betLevels`-Liste
-  über `PlayerProgressionService.availableBets(...)` auf das, was das
-  aktuelle Level tatsächlich freischaltet (`SpinSessionController.
+- **Einsatzlimits (geteilte Einsatzleiter, pro Spiel verschoben):**
+  `PlayerProgressionService.stakeSequenceValue(atIndex:)` erzeugt eine
+  einzige, für beide Spiele gemeinsame Zahlenfolge nach dem Muster `10, 25,
+  50, 100, 250, 500, 1000, 2500, 5000, 10000, 25000, 50000, ...`
+  (dekadisch, ×1/×2.5/×5). Jedes Spiel hat dort nur einen eigenen
+  Startindex (`SlotGameDefinition.betTierStartIndex` - Infernal Forge bei
+  Index 4 = 250, entspricht seinem bisherigen `perLine: 25`-Höchsteinsatz
+  über 10 Paylines; Demonic Risk Ladder bei Index 5 = 500, sein bisheriger
+  Höchsteinsatz) und schaltet **alle 10 Level**
+  (`PlayerLevelConfiguration.levelsPerBetTierStep`) den nächsten Wert der
+  Leiter frei: `maxBet(level, betTierStartIndex) = stakeSequenceValue(
+  betTierStartIndex + level / 10)`. Level 1 bleibt also exakt beim
+  bisherigen Höchsteinsatz jedes Spiels, Level 10 verdoppelt ihn (Forge
+  250→500, Risk Ladder 500→1.000), Level 20 wieder, und so weiter bis
+  Level 100. `effectiveMaxBet = min(maxBet(...), spielEigenesMaxBet)`.
+  Jedes Spiel filtert seine eigene, aus derselben Leiter generierte
+  `betLevels`-Liste (siehe `InfernalForgeDefinition.betLevels`/
+  `RiskLadderConfiguration.stakeLevels`) über
+  `PlayerProgressionService.availableBets(...)` auf das, was das aktuelle
+  Level tatsächlich freischaltet (`SpinSessionController.
   availableBetLevels`, `RiskLadderSessionController.availableStakeLevels`) -
-  ein gesperrter Einsatz lässt sich weder in der UI auswählen noch (als
-  zweite, unabhängige Absicherung) tatsächlich starten
-  (`spin()`/`startRound()` prüfen das erneut). Der nächste gesperrte Einsatz
-  wird als kleiner "🔒 Level X schaltet Y Coins frei"-Hinweis unterhalb der
-  bestehenden Einsatzsteuerung angezeigt, ohne deren UI umzubauen.
+  wichtig: verglichen wird immer der **Gesamteinsatz**
+  (`definition.totalBet(betPerLine:)`, also `perLine × aktive Paylines`),
+  nie der bloße `perLine`-Wert, da Infernal Forge 10 Paylines hat und
+  Demonic Risk Ladder nur eine. Ein gesperrter Einsatz lässt sich weder in
+  der UI auswählen noch (als zweite, unabhängige Absicherung) tatsächlich
+  starten (`spin()`/`startRound()` prüfen das erneut). Der nächste
+  gesperrte Einsatz wird als kleiner "🔒 Level X schaltet Y Coins frei"-
+  Hinweis unterhalb der bestehenden Einsatzsteuerung angezeigt, ohne deren
+  UI umzubauen.
 - **Level-Konfiguration** (`PlayerLevelConfiguration.swift`): zwei bewusst
-  getrennte, leicht erweiterbare Tabellen - `levels` (Win-Bonus pro Level,
-  dicht bis Level 10, danach bleibt der letzte Wert stehen) und `betTiers`
-  (Meilensteine für das Max-Bet). Neue Stufen/Tiers hinzufügen heißt nur,
-  diese Arrays zu erweitern.
+  getrennte, leicht erweiterbare Werte - `levels` (Win-Bonus pro Level,
+  dicht bis Level 10, danach bleibt der letzte Wert stehen) und
+  `levelsPerBetTierStep` (wie oft die geteilte Einsatzleiter eine Stufe
+  weiterschaltet). Neue Win-Bonus-Stufen hinzufügen heißt nur, `levels` zu
+  erweitern; an der Einsatzleiter selbst muss dafür nichts geändert werden.
 - **Validierung, zweifach:** Level (`1...100`) und Multiplikator
   (`0.10...2.00`, `NaN`/`Infinity` → Fallback `1.0`) werden sowohl vom
   Backend (`routes/admin.js`, lehnt ungültige Werte mit `400` ab) als auch
@@ -241,6 +260,62 @@ SlotEngine / RiskLadderEngine
   Profilwert behandelt, niemals aus dem Coin-Guthaben berechnet - ein Spieler
   mit vielen Coins ist nicht automatisch hochstufig.
 
+### Admin-Modus "garantierter Jackpot"
+
+`guaranteedJackpot` ist ein reiner Admin-Schalter (nur über die Admin-App
+setzbar, nie durch Gameplay) - solange er `true` ist, gewinnt dieser
+Spieler auf seinem Gerät **immer** den bestmöglichen Ausgang, ohne
+jeglichen Zufalls-Wurf:
+
+- **Demonic Risk Ladder:** `RiskLadderEngine.attemptClimb` gibt sofort
+  `true` zurück, sobald `probabilityContext.guaranteesJackpot` gesetzt ist
+  - noch vor dem eigentlichen Wahrscheinlichkeits-Wurf. Jeder Klettern-
+  Versuch gelingt, bis zur obersten (Jackpot-)Stufe.
+- **Infernal Forge:** Da ein Spin-Ergebnis aus vielen Walzen/Symbolen
+  entsteht (nicht aus einer einzelnen Wahrscheinlichkeit), lässt sich
+  "garantiert gewinnen" nicht über eine Stop-Index-Gewichtung erzwingen -
+  ein Walzenstreifen hat keine Garantie auf eine lange Folge desselben
+  Symbols. Stattdessen überschreibt `SlotEngine.spin(...)` das fertig
+  berechnete Grid direkt mit dem wertvollsten Symbol des Spiels
+  (`ReelSpinner.highestValueSymbol`, ermittelt aus Paytable + Scatter-
+  Auszahlung) in jeder Zelle. Bei Infernal Forge ist das Wild
+  (`infernalCrown`) zufällig gleichzeitig auch das höchstzahlende reguläre
+  Symbol - das Grid wird also komplett mit dem Wild gefüllt, wodurch die
+  **bestehende, unveränderte** `PaylineEvaluator`-Wild-Ersetzungslogik auf
+  jeder einzelnen Payline automatisch die maximale Auszahlung erkennt,
+  ohne dass an der Auswertung selbst irgendetwas geändert werden musste.
+  Die Walzen-Animation (`stopIndices`) bleibt ein echter Wurf - nur das
+  ausgewertete/angezeigte Grid wird überschrieben.
+- **Bewusst ein harter Bypass, kein extremer Multiplikator:** ein
+  `finalWinMultiplier` läuft immer noch durch `adjustedProbability`s
+  Deckel (`maximumEffectiveWinChance`, Default 95 %) und echtes RNG - damit
+  könnte "immer" nie tatsächlich erreicht werden. `guaranteesJackpot` ist
+  deshalb ein eigenes, unabhängiges Feld auf `GameProbabilityContext`, kein
+  Sonderwert für `finalWinMultiplier`.
+- Serverseitig verhält sich `guaranteed_jackpot` genau wie `level`/
+  `win_chance_multiplier`: admin-only, löst keinen `admin_revision`-Bump
+  aus, wird bei jedem Sync einfach als aktueller Wert mitgeliefert (siehe
+  `backend/README.md`).
+
+### Autospin (Infernal Forge)
+
+Den Spin-Button gedrückt halten (`onLongPressGesture`, 0,45 s) aktiviert
+Autospin: `SpinSessionController.toggleAutoSpin()` setzt `isAutoSpinning`
+und queued sofort einen Spin. Nach jedem abgeschlossenen Spin (inklusive
+jedes einzelnen Freispiels innerhalb einer Bonusrunde - Hooks in
+`runSpinSequence()`s finalem `state = .idle` und in
+`acknowledgeBonusSummary()`) wird nach einer kurzen Pause
+(`SpinTiming.autoSpinPause`, 0,5 s) automatisch der nächste Spin ausgelöst,
+solange `isAutoSpinning` noch an ist. Einfaches Antippen des Buttons
+während Autospin schaltet es sofort wieder aus (`toggleAutoSpin()` erneut).
+Der Button wechselt während Autospin die Farbe (Radial-Gradient auf
+`glowingViolet`/`hellfireRed` statt `emberOrange`/`hellfireRed`, violetter
+Rahmen/Glow) und zeigt "AUTO" statt "SPIN". Autospin stoppt sich außerdem
+selbst, sobald ein Spin scheitert (nicht genug Guthaben, ein inzwischen
+gesperrter Einsatz, eine ungültige Definition) oder ein Fehler manuell
+weggetippt wird (`dismissError()`) - nie persistiert, jede neue
+`SpinSessionController`-Instanz startet mit Autospin aus.
+
 ### XP: Level wird durch Spielen automatisch erreicht
 
 Level steigt nicht nur, wenn du es im Admin-Panel setzt, sondern auch von
@@ -256,8 +331,9 @@ selbst durch Spielen - beides gleichzeitig, ohne Widerspruch:
 - **XP → Level:** `PlayerProgressionService.cumulativeXPRequired(forLevel:)`
   ist eine einfache dreieckige Kurve (`xpStep * level * (level-1) / 2`,
   `xpStep = 500` in `PlayerLevelConfiguration`) - Level 2 kostet 500 XP
-  insgesamt, Level 10 (Deckel des Win-Bonus) 22.500, Level 30 (Deckel der
-  Bet-Tiers) 217.500, Level 100 (absolutes Maximum) 2.475.000. Startwert,
+  insgesamt, Level 10 (Deckel des Win-Bonus, erste Einsatzleiter-Stufe)
+  22.500, Level 100 (absolutes Maximum, letzte Einsatzleiter-Stufe)
+  2.475.000. Startwert,
   keine gemessene Balance - `xpStep` ist der eine Wert zum Nachjustieren.
 - **Anspruch, kein Zwang:** Bei jedem Sync berechnet der Client sein
   eigenes `PlayerProgressionService.level(forTotalXP:)` und schickt es nur

@@ -46,6 +46,14 @@ final class SpinSessionController {
     private(set) var totalFreeSpinsInRound: Int = 0
     private(set) var bonusAccumulatedPayout: Int64 = 0
     private(set) var errorMessage: String?
+    /// Toggled by holding the spin button (see `SlotMachineView`) - while
+    /// on, a new spin is queued automatically every time the machine
+    /// becomes ready again, including through every free spin of a bonus
+    /// round, so the player never has to keep tapping to clear one. Never
+    /// persisted - always starts off for a freshly created controller
+    /// (leaving the screen, relaunching the app), deliberately, so autospin
+    /// never silently resumes without the player re-engaging it.
+    private(set) var isAutoSpinning = false
 
     init(
         definition: SlotGameDefinition,
@@ -86,14 +94,14 @@ final class SpinSessionController {
         state == .idle
     }
 
-    /// This player's current level/win-chance multiplier, straight from the
-    /// shared `PlayerProfile` (validated again here regardless of whether
-    /// `AccountSyncController` already validated it on the way in - see
-    /// `PlayerProgressionService`'s header comment on why that's cheap
-    /// insurance, not redundant).
-    private var progressionInputs: (level: Int, playerMultiplier: Double) {
+    /// This player's current level/win-chance multiplier/admin jackpot
+    /// flag, straight from the shared `PlayerProfile` (level/multiplier
+    /// validated again here regardless of whether `AccountSyncController`
+    /// already validated them on the way in - see `PlayerProgressionService`'s
+    /// header comment on why that's cheap insurance, not redundant).
+    private var progressionInputs: (level: Int, playerMultiplier: Double, guaranteesJackpot: Bool) {
         let profile = wallet.currentProfile()
-        return (Int(profile.level), profile.winChanceMultiplier)
+        return (Int(profile.level), profile.winChanceMultiplier, profile.hasGuaranteedJackpot)
     }
 
     /// The win-chance context this player currently has for any game,
@@ -101,17 +109,37 @@ final class SpinSessionController {
     /// every mechanic loading `PlayerProfile`/the backend itself.
     var probabilityContext: GameProbabilityContext {
         let inputs = progressionInputs
-        return PlayerProgressionService.probabilityContext(level: inputs.level, playerMultiplier: inputs.playerMultiplier)
+        return PlayerProgressionService.probabilityContext(
+            level: inputs.level,
+            playerMultiplier: inputs.playerMultiplier,
+            guaranteesJackpot: inputs.guaranteesJackpot
+        )
     }
 
     /// This game's own bet levels, filtered down to what the player's
     /// current level actually unlocks - `min(playerLevelMaxBet,
     /// gameMaximumBet)` applied to `definition.betLevels`. Never mutates
     /// `definition.betLevels` itself.
+    ///
+    /// Compares `definition.totalBet(betPerLine:)` (the actual Soul Coins
+    /// wagered per spin at that bet level - `perLine * activeLineCount`),
+    /// never bare `perLine`, against the ladder-derived limit: the shared
+    /// stake ladder's numbers (see `PlayerProgressionService.
+    /// stakeSequenceValue(atIndex:)`/`SlotGameDefinition.
+    /// betTierStartIndex`'s doc comments) are a "Max Einsatz" a player
+    /// would recognize - the total risked in one spin - which for a
+    /// multi-payline game like Infernal Forge is *not* the same number as
+    /// its `perLine` bet levels. Risk Ladder has exactly one "line", so
+    /// `totalBet(betPerLine:) == betPerLine` there and this is a no-op -
+    /// one formula, correct for both without a second special case.
     var availableBetLevels: [BetLevel] {
-        let gameMaximumBet = definition.betLevels.map(\.perLine).max() ?? 0
-        let limit = PlayerProgressionService.effectiveMaxBet(level: progressionInputs.level, gameMaximumBet: gameMaximumBet)
-        return definition.betLevels.filter { $0.perLine <= limit }
+        let gameMaximumBet = definition.betLevels.map { definition.totalBet(betPerLine: $0.perLine) }.max() ?? 0
+        let limit = PlayerProgressionService.effectiveMaxBet(
+            level: progressionInputs.level,
+            gameMaximumBet: gameMaximumBet,
+            betTierStartIndex: definition.betTierStartIndex
+        )
+        return definition.betLevels.filter { definition.totalBet(betPerLine: $0.perLine) <= limit }
     }
 
     /// Bet levels this game supports but the player's level doesn't unlock
@@ -122,7 +150,15 @@ final class SpinSessionController {
         let unlocked = Set(availableBetLevels.map(\.perLine))
         return definition.betLevels
             .filter { !unlocked.contains($0.perLine) }
-            .map { ($0, PlayerProgressionService.unlockLevel(forBet: $0.perLine)) }
+            .map {
+                (
+                    $0,
+                    PlayerProgressionService.unlockLevel(
+                        forBet: definition.totalBet(betPerLine: $0.perLine),
+                        betTierStartIndex: definition.betTierStartIndex
+                    )
+                )
+            }
     }
 
     /// The largest single-round payout ever recorded for this game,
@@ -156,6 +192,7 @@ final class SpinSessionController {
     func dismissError() {
         guard case .error = state else { return }
         errorMessage = nil
+        isAutoSpinning = false
         state = .idle
     }
 
@@ -169,6 +206,34 @@ final class SpinSessionController {
         bonusAccumulatedPayout = 0
         try? context.save()
         state = .idle
+        continueAutoSpinIfNeeded()
+    }
+
+    /// Engages/disengages autospin (see `isAutoSpinning`'s doc comment).
+    /// Turning it on immediately queues a spin if the machine is currently
+    /// ready; turning it off just stops future spins from being queued -
+    /// a spin already in flight always finishes normally.
+    func toggleAutoSpin() {
+        isAutoSpinning.toggle()
+        if isAutoSpinning {
+            continueAutoSpinIfNeeded()
+        }
+    }
+
+    /// Queues the next automatic spin after a short pause, if autospin is
+    /// engaged and the machine is actually ready. A no-op otherwise -
+    /// safe to call speculatively from anywhere `state` might have just
+    /// become `.idle`. `spin()` itself is what turns `isAutoSpinning` back
+    /// off the moment an attempt is actually refused (insufficient funds,
+    /// a now-locked bet, ...), so this never needs to duplicate that
+    /// validation - it only ever has to decide *when* to try again.
+    private func continueAutoSpinIfNeeded() {
+        guard isAutoSpinning, canSpin else { return }
+        Task { [weak self] in
+            await self?.sleep(SpinTiming.autoSpinPause)
+            guard let self, self.isAutoSpinning, self.canSpin else { return }
+            self.spin()
+        }
     }
 
     func spin() {
@@ -187,6 +252,7 @@ final class SpinSessionController {
         if !isFreeSpin, !availableBetLevels.contains(where: { $0.perLine == betPerLine }) {
             errorMessage = "Dieser Einsatz ist mit deinem aktuellen Level nicht mehr freigeschaltet."
             state = .error(message: errorMessage!)
+            isAutoSpinning = false
             return
         }
 
@@ -208,9 +274,11 @@ final class SpinSessionController {
         case .insufficientFunds:
             errorMessage = "Nicht genug Soul Coins für diesen Einsatz."
             state = .idle
+            isAutoSpinning = false
         case .invalidDefinition(let message):
             errorMessage = message
             state = .error(message: message)
+            isAutoSpinning = false
         case .prepared(let pending, let evaluation):
             currentEvaluation = evaluation
             lastBetPerLineUsed = betPerLine
@@ -284,6 +352,7 @@ final class SpinSessionController {
         }
 
         state = .idle
+        continueAutoSpinIfNeeded()
     }
 
     private func sleep(_ seconds: Double) async {

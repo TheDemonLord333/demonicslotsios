@@ -174,12 +174,17 @@ struct RiskLadderSessionControllerTests {
         let definition = RiskLadderDefinition.definition
         let controller = RiskLadderSessionController(definition: definition, context: context, levels: shortLevels)
 
-        // Level 1's global max bet is 100 - Demonic Risk Ladder's own
-        // stakes are 10/25/50/100/250/500 (`RiskLadderConfiguration.
-        // stakeLevels`), so only the ones at or below 100 should be
-        // selectable yet.
-        #expect(controller.availableStakeLevels.map(\.perLine) == [10, 25, 50, 100])
-        #expect(controller.lockedStakeLevels.contains { $0.bet.perLine == 250 })
+        // Level 1 unlocks a total stake up to 500 Soul Coins -
+        // `RiskLadderConfiguration.betTierStartIndex`'s stake-ladder value,
+        // unchanged from the game's own long-standing top stake. All 6 of
+        // the game's original hand-picked stakes (10/25/50/100/250/500)
+        // fit under that and stay available; `stakeLevels` also now
+        // carries the higher tiers that levels 10/20/... unlock, which
+        // aren't yet.
+        let originalStakes: [Int64] = [10, 25, 50, 100, 250, 500]
+        #expect(controller.availableStakeLevels.map(\.perLine) == originalStakes)
+        #expect(!controller.lockedStakeLevels.isEmpty)
+        #expect(controller.lockedStakeLevels.allSatisfy { !originalStakes.contains($0.bet.perLine) })
     }
 
     @Test func startRoundRefusesALockedStakeEvenIfSomehowSelectedDirectly() {
@@ -192,7 +197,7 @@ struct RiskLadderSessionControllerTests {
         // code path that sets the property directly) - `startRound()` must
         // still catch it with its own independent re-check before any money
         // moves.
-        controller.selectedStake = 500 // above level 1's 100-coin limit
+        controller.selectedStake = 1_000 // level 1's limit is 500; 1,000 isn't unlocked until level 10
         controller.startRound()
 
         #expect(controller.wallet.balance == startBalance) // nothing was ever debited

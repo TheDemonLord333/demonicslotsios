@@ -15,15 +15,15 @@ import Foundation
 // keeps these plain outcome values callable from any isolation context
 // without relying on nested-type isolation inference.
 nonisolated enum RegisterOutcome: Equatable, Sendable {
-    case success(username: String, deviceToken: String, coinBalance: Int64, adminRevision: Int64, level: Int64, winChanceMultiplier: Double)
+    case success(username: String, deviceToken: String, coinBalance: Int64, adminRevision: Int64, level: Int64, winChanceMultiplier: Double, guaranteedJackpot: Bool)
     case usernameTaken
     case invalidUsername
     case networkError(String)
 }
 
 nonisolated enum SyncOutcome: Equatable, Sendable {
-    case serverWins(coinBalance: Int64, adminRevision: Int64, level: Int64, winChanceMultiplier: Double)
-    case clientApplied(adminRevision: Int64, level: Int64, winChanceMultiplier: Double)
+    case serverWins(coinBalance: Int64, adminRevision: Int64, level: Int64, winChanceMultiplier: Double, guaranteedJackpot: Bool)
+    case clientApplied(adminRevision: Int64, level: Int64, winChanceMultiplier: Double, guaranteedJackpot: Bool)
     case notRegistered
     case invalidDeviceToken
     case networkError(String)
@@ -70,7 +70,8 @@ nonisolated struct BackendSyncService: Sendable {
                     coinBalance: coinBalance,
                     adminRevision: adminRevision,
                     level: level,
-                    winChanceMultiplier: winChanceMultiplier
+                    winChanceMultiplier: winChanceMultiplier,
+                    guaranteedJackpot: (json["guaranteedJackpot"] as? Bool) ?? false
                 )
             case 409:
                 return .usernameTaken
@@ -128,10 +129,11 @@ nonisolated struct BackendSyncService: Sendable {
                 else {
                     return .networkError("Unerwartete Serverantwort.")
                 }
+                let guaranteedJackpot = (json["guaranteedJackpot"] as? Bool) ?? false
                 if resolution == "server_wins" {
-                    return .serverWins(coinBalance: coinBalance, adminRevision: adminRevision, level: level, winChanceMultiplier: winChanceMultiplier)
+                    return .serverWins(coinBalance: coinBalance, adminRevision: adminRevision, level: level, winChanceMultiplier: winChanceMultiplier, guaranteedJackpot: guaranteedJackpot)
                 }
-                return .clientApplied(adminRevision: adminRevision, level: level, winChanceMultiplier: winChanceMultiplier)
+                return .clientApplied(adminRevision: adminRevision, level: level, winChanceMultiplier: winChanceMultiplier, guaranteedJackpot: guaranteedJackpot)
             case 403:
                 return .invalidDeviceToken
             case 404:

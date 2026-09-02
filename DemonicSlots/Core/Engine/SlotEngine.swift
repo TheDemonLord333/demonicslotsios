@@ -54,12 +54,24 @@ nonisolated struct SlotEngine: Sendable {
             probabilityContext: probabilityContext,
             randomSource: &randomSource
         )
-        let grid = ReelSpinner.visibleGrid(
+        var grid = ReelSpinner.visibleGrid(
             stopIndices: stopIndices,
             reelStrips: definition.reelStrips,
             visibleRows: definition.visibleRows,
             placeholderSymbol: placeholder
         )
+        // Admin "garantierter Jackpot" mode: overwrite the landed grid
+        // outright with the game's highest-value symbol in every cell,
+        // maximizing every payline's match count/payout simultaneously -
+        // see ReelSpinner.swift's header comment for why this can't be
+        // done by biasing stopIndices the way a normal bonus is.
+        // `stopIndices`/the reel-stop animation are unaffected (still a
+        // real roll), only the grid the player actually sees/scores is
+        // overridden - `ReelsGridView` reads `spinResult.grid`, never
+        // re-derives it from `stopIndices` itself.
+        if probabilityContext.guaranteesJackpot, let topSymbol = ReelSpinner.highestValueSymbol(definition: definition) {
+            grid = Array(repeating: Array(repeating: topSymbol, count: definition.visibleRows), count: definition.reelCount)
+        }
         let spinResult = SpinResult(stopIndices: stopIndices, grid: grid)
 
         let totalBet = definition.totalBet(betPerLine: betPerLine)
